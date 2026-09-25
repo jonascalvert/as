@@ -18,6 +18,8 @@ Aucune installation, aucun compte, aucun serveur : ouvrez `index.html` dans votr
 - **Tableau de bord** : CA encaissé de l’année, progression vers le plafond micro-entreprise,
   estimation des cotisations URSSAF, montants à encaisser, devis en attente.
 - **Sauvegarde** : export / import JSON.
+- **Exemple intégré** : bouton « Voir un exemple » pour découvrir l’application avec des données fictives, puis « Effacer l’exemple » pour commencer.
+- Fonctionne sur ordinateur et téléphone, en thème clair ou sombre.
 
 ## Utilisation
 

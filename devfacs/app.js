@@ -4,6 +4,8 @@
   'use strict';
 
   const STORAGE_KEY = 'devfacs:v1';
+  // Version de démonstration en ligne : pas d'impression ni de téléchargement possibles.
+  const DEMO = !!window.DEVFACS_DEMO;
 
   const STATUS = {
     devis: {
@@ -74,6 +76,72 @@
     }
   }
 
+  // Données d'exemple pour découvrir l'application (noms et montants fictifs).
+  function sampleData() {
+    const today = todayISO();
+    const ago = n => addDays(today, -n);
+    const year = today.slice(0, 4);
+    const settings = Object.assign({}, DEFAULT_SETTINGS, {
+      name: 'Marie Joseph',
+      activity: 'Graphiste et création de sites web',
+      address: '12 rue des Flamboyants\n97110 Pointe-à-Pitre',
+      email: 'contact@exemple.fr',
+      phone: '0690 00 00 00',
+      siret: '000 000 000 00000',
+      iban: 'FR76 0000 0000 0000 0000 0000 000',
+      bic: 'EXEMPLEXXX',
+      paymentMethods: 'Virement bancaire, chèque'
+    });
+    const clients = [
+      { id: 'ex-c1', name: 'Boulangerie Ti Pain', contact: 'M. Célestin', address: '5 place de la Victoire\n97110 Pointe-à-Pitre', email: 'tipain@exemple.fr', phone: '0590 00 00 01', siret: '000 000 000 00001', isPro: true },
+      { id: 'ex-c2', name: 'Hôtel Bèl Solèy', contact: 'Mme Alexandre', address: 'Route de la Plage\n97118 Saint-François', email: 'direction@exemple.fr', phone: '0590 00 00 02', siret: '000 000 000 00002', isPro: true },
+      { id: 'ex-c3', name: 'Jean-Marc Pierre', contact: '', address: '8 allée des Palmiers\n97190 Le Gosier', email: 'jm.pierre@exemple.fr', phone: '0690 00 00 03', siret: '', isPro: false }
+    ];
+    const issuer = {
+      name: settings.name, activity: settings.activity, address: settings.address, email: settings.email,
+      phone: settings.phone, siret: settings.siret, iban: settings.iban, bic: settings.bic
+    };
+    const logo = [{ desc: 'Création du logo (3 propositions)', qty: 1, unit: 'forfait', price: 450 }, { desc: 'Cartes de visite et flyer', qty: 2, unit: 'u', price: 120 }];
+    const site = [
+      { desc: 'Maquette et design du site (5 pages)', qty: 4, unit: 'j', price: 380 },
+      { desc: 'Intégration et mise en ligne', qty: 3, unit: 'j', price: 380 },
+      { desc: 'Hébergement et nom de domaine (1 an)', qty: 1, unit: 'an', price: 120 }
+    ];
+    let order = 0;
+    const doc = (type, n, clientId, subject, lines, extra) => Object.assign({
+      id: 'ex-' + type + n,
+      type,
+      number: (type === 'devis' ? 'D-' : 'F-') + year + '-' + String(n).padStart(3, '0'),
+      clientId,
+      client: Object.assign({}, clients.find(c => c.id === clientId)),
+      subject,
+      lines: lines.map(l => Object.assign({}, l)),
+      tvaEnabled: false, tvaRate: 20, notes: '', paidDate: '', fromDevisId: '',
+      dueDate: '', validUntil: '', issuer, createdAt: ++order
+    }, extra);
+    const docs = [
+      doc('devis', 1, 'ex-c1', 'Identité visuelle', logo, { date: ago(60), validUntil: ago(30), status: 'accepte' }),
+      doc('facture', 1, 'ex-c1', 'Identité visuelle', logo, { date: ago(50), dueDate: ago(20), status: 'payee', paidDate: ago(35), fromDevisId: 'ex-devis1' }),
+      doc('devis', 2, 'ex-c2', 'Site vitrine de l’hôtel', site, { date: ago(45), validUntil: ago(15), status: 'accepte' }),
+      doc('facture', 2, 'ex-c2', 'Site vitrine de l’hôtel', site, { date: ago(40), dueDate: ago(10), status: 'envoye', fromDevisId: 'ex-devis2' }),
+      doc('facture', 3, 'ex-c3', 'Faire-part de mariage', [{ desc: 'Création graphique du faire-part', qty: 1, unit: 'forfait', price: 180 }, { desc: 'Menu et marque-places', qty: 1, unit: 'forfait', price: 90 }], { date: ago(20), dueDate: addDays(ago(20), 30), status: 'payee', paidDate: ago(5) }),
+      doc('devis', 3, 'ex-c1', 'Site de commande en ligne', [{ desc: 'Conception du site de commande', qty: 5, unit: 'j', price: 380 }, { desc: 'Formation à l’utilisation', qty: 2, unit: 'h', price: 55 }], { date: ago(3), validUntil: addDays(ago(3), 30), status: 'envoye', notes: 'Acompte de 30 % à la signature.' }),
+      doc('facture', 4, 'ex-c2', 'Maintenance du site', [{ desc: 'Maintenance et mises à jour', qty: 4, unit: 'h', price: 55 }], { date: ago(2), dueDate: addDays(ago(2), 30), status: 'envoye' })
+    ];
+    const counters = {};
+    counters['devis-' + year] = 3;
+    counters['facture-' + year] = 4;
+    return { settings, clients, docs, counters };
+  }
+
+  function isSample() {
+    return state.docs.some(d => d.id.indexOf('ex-') === 0) || state.clients.some(c => c.id.indexOf('ex-') === 0);
+  }
+
+  function isEmpty() {
+    return !state.docs.length && !state.clients.length;
+  }
+
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
@@ -130,12 +198,109 @@
     return d + '/' + m + '/' + y;
   }
 
+  function autoGrow(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 2 + 'px';
+  }
+
   function toast(message) {
     const el = document.getElementById('toast');
     el.textContent = message;
     el.classList.add('show');
     clearTimeout(toast.timer);
     toast.timer = setTimeout(() => el.classList.remove('show'), 2500);
+  }
+
+  // Fenêtres de dialogue dans la page (remplacent alert / confirm / prompt).
+  // Résout avec la valeur renvoyée par onConfirm (true par défaut), ou null si annulé.
+  function openModal(opts) {
+    return new Promise(resolve => {
+      const prevFocus = document.activeElement;
+      const backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop no-print';
+      backdrop.innerHTML = `
+        <form class="modal" role="dialog" aria-modal="true" ${opts.title ? 'aria-labelledby="modal-title"' : ''} novalidate>
+          ${opts.title ? `<h2 id="modal-title">${esc(opts.title)}</h2>` : ''}
+          ${opts.message ? `<p class="modal-msg">${esc(opts.message)}</p>` : ''}
+          ${opts.body || ''}
+          <div class="btn-row modal-actions">
+            ${opts.cancelText === null ? '' : `<button type="button" class="btn" data-cancel>${esc(opts.cancelText || 'Annuler')}</button>`}
+            <button type="submit" class="btn ${opts.danger ? 'danger-fill' : 'primary'}">${esc(opts.confirmText || 'OK')}</button>
+          </div>
+        </form>`;
+      document.body.appendChild(backdrop);
+      const form = backdrop.querySelector('form');
+
+      function close(value) {
+        backdrop.remove();
+        document.removeEventListener('keydown', onKey);
+        if (prevFocus && prevFocus.focus) prevFocus.focus();
+        resolve(value);
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') close(null);
+      }
+      document.addEventListener('keydown', onKey);
+      backdrop.addEventListener('mousedown', e => { if (e.target === backdrop) close(null); });
+      const cancel = form.querySelector('[data-cancel]');
+      if (cancel) cancel.onclick = () => close(null);
+      form.onsubmit = e => {
+        e.preventDefault();
+        const value = opts.onConfirm ? opts.onConfirm(form) : true;
+        if (value !== false && value != null) close(value);
+      };
+      (form.querySelector('input, textarea, select') || form.querySelector('[type=submit]')).focus();
+    });
+  }
+
+  function uiAlert(message, title) {
+    return openModal({ title, message, cancelText: null });
+  }
+
+  function uiConfirm(message, opts) {
+    return openModal(Object.assign({ message }, opts || {})).then(v => v === true);
+  }
+
+  // Champs du formulaire client, partagés entre la page Clients et la création rapide.
+  function clientFieldsHTML(c, p) {
+    return `
+      <div class="field"><label for="${p}-name">Nom / Raison sociale *</label><input id="${p}-name" value="${esc(c.name)}"></div>
+      <div class="field"><label for="${p}-contact">Contact</label><input id="${p}-contact" value="${esc(c.contact)}"></div>
+      <div class="field full"><label for="${p}-address">Adresse</label><textarea id="${p}-address" rows="2">${esc(c.address)}</textarea></div>
+      <div class="field"><label for="${p}-email">E-mail</label><input id="${p}-email" type="email" value="${esc(c.email)}"></div>
+      <div class="field"><label for="${p}-phone">Téléphone</label><input id="${p}-phone" value="${esc(c.phone)}"></div>
+      <div class="field"><label for="${p}-siret">SIRET (si professionnel)</label><input id="${p}-siret" value="${esc(c.siret)}"></div>
+      <label class="checkbox field"><input type="checkbox" id="${p}-pro" ${c.isPro !== false ? 'checked' : ''}> Client professionnel</label>`;
+  }
+
+  function readClientFields(root, p) {
+    const val = id => root.querySelector('#' + p + '-' + id).value.trim();
+    return {
+      name: val('name'), contact: val('contact'), address: val('address'),
+      email: val('email'), phone: val('phone'), siret: val('siret'),
+      isPro: root.querySelector('#' + p + '-pro').checked
+    };
+  }
+
+  function emptyClient() {
+    return { id: '', name: '', contact: '', address: '', email: '', phone: '', siret: '', isPro: true };
+  }
+
+  function askNewClient() {
+    return openModal({
+      title: 'Nouveau client',
+      body: `<div class="grid cols-2">${clientFieldsHTML(emptyClient(), 'm')}</div>`,
+      confirmText: 'Créer le client',
+      onConfirm: form => {
+        const data = readClientFields(form, 'm');
+        if (!data.name) {
+          form.querySelector('#m-name').focus();
+          toast('Indiquez au moins le nom du client.');
+          return false;
+        }
+        return data;
+      }
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -229,7 +394,7 @@
     return state.docs.find(d => d.id === id);
   }
 
-  function deleteDoc(doc) {
+  async function deleteDoc(doc) {
     if (doc.type === 'facture') {
       // La numérotation des factures doit être continue : on ne supprime que la dernière.
       const year = doc.number.split('-').slice(-2, -1)[0];
@@ -238,12 +403,12 @@
         .filter(d => d.type === 'facture' && d.number.split('-').slice(-2, -1)[0] === year)
         .sort((a, b) => b.number.localeCompare(a.number))[0];
       if (!last || last.id !== doc.id) {
-        alert('Pour garder une numérotation continue (obligation légale), seule la dernière facture peut être supprimée.\n\nPour cette facture, utilisez plutôt le statut « Annulée ».');
+        await uiAlert('Pour garder une numérotation continue (obligation légale), seule la dernière facture peut être supprimée.\n\nPour cette facture, utilisez plutôt le statut « Annulée ».', 'Suppression impossible');
         return false;
       }
-      if (!confirm('Supprimer définitivement la facture ' + doc.number + ' ?')) return false;
+      if (!await uiConfirm('Supprimer définitivement la facture ' + doc.number + ' ?', { confirmText: 'Supprimer', danger: true })) return false;
       state.counters[key] = Math.max(0, (state.counters[key] || 1) - 1);
-    } else if (!confirm('Supprimer définitivement le devis ' + doc.number + ' ?')) {
+    } else if (!await uiConfirm('Supprimer définitivement le devis ' + doc.number + ' ?', { confirmText: 'Supprimer', danger: true })) {
       return false;
     }
     state.docs = state.docs.filter(d => d.id !== doc.id);
@@ -327,7 +492,9 @@
         </div>
       </div>
 
-      ${!s.name ? `<div class="alert info">Bienvenue ! Commencez par renseigner vos informations (nom, SIRET, adresse…) dans <a href="#/parametres">Paramètres</a> : elles apparaîtront sur vos devis et factures.</div>` : ''}
+      ${!s.name ? `<div class="alert info">Bienvenue ! Commencez par renseigner vos informations (nom, SIRET, adresse…) dans <a href="#/parametres">Paramètres</a> : elles apparaîtront sur vos devis et factures.
+        ${isEmpty() ? `<div class="btn-row" style="margin-top:10px"><button class="btn small" id="load-sample">Voir un exemple</button></div>` : ''}</div>` : ''}
+      ${isSample() ? `<div class="alert info">Vous regardez des <strong>données d’exemple</strong>. Quand vous êtes prêt, cliquez sur <button class="btn small" id="clear-sample">Effacer l’exemple</button> pour commencer avec vos propres informations.</div>` : ''}
       ${late.length ? `<div class="alert">${late.length} facture(s) en retard de paiement pour ${money(late.reduce((sum, d) => sum + totals(d).ttc, 0))}.</div>` : ''}
 
       <div class="stats">
@@ -361,6 +528,25 @@
     `;
     bindNewButtons();
     bindDocRows();
+    const loadBtn = document.getElementById('load-sample');
+    if (loadBtn) {
+      loadBtn.onclick = () => {
+        state = normalize(sampleData());
+        save();
+        toast('Exemple chargé');
+        renderDashboard();
+      };
+    }
+    const clearBtn = document.getElementById('clear-sample');
+    if (clearBtn) {
+      clearBtn.onclick = async () => {
+        if (!await uiConfirm('Effacer toutes les données d’exemple pour commencer avec les vôtres ?', { confirmText: 'Effacer l’exemple', danger: true })) return;
+        state = normalize(null);
+        save();
+        toast('Exemple effacé');
+        go('#/parametres');
+      };
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -568,7 +754,9 @@
       $('lines').querySelectorAll('tr[data-i]').forEach(row => {
         const i = Number(row.dataset.i);
         row.querySelectorAll('[data-k]').forEach(input => {
+          if (input.tagName === 'TEXTAREA') autoGrow(input);
           input.oninput = () => {
+            if (input.tagName === 'TEXTAREA') autoGrow(input);
             doc.lines[i][input.dataset.k] = input.value;
             row.querySelector('.total').textContent = money(lineTotal(doc.lines[i]));
             touch();
@@ -595,18 +783,17 @@
 
     $('f-client').onchange = e => {
       if (e.target.value === '__new') {
-        const name = prompt('Nom du nouveau client :');
-        if (name && name.trim()) {
-          const client = { id: uid(), name: name.trim(), contact: '', address: '', email: '', phone: '', siret: '', isPro: true };
+        e.target.value = doc.clientId;
+        askNewClient().then(data => {
+          if (!data) return;
+          const client = Object.assign({ id: uid() }, data);
           state.clients.push(client);
           doc.clientId = client.id;
           doc.client = snapshotClient(client.id);
           save();
-          toast('Client créé. Complétez son adresse dans l’onglet Clients.');
+          toast('Client « ' + client.name + ' » créé');
           renderEditor(doc.id);
-          return;
-        }
-        e.target.value = doc.clientId;
+        });
         return;
       }
       doc.clientId = e.target.value;
@@ -640,22 +827,28 @@
     };
     $('f-tva-rate').oninput = e => { doc.tvaRate = e.target.value; touch(); };
 
-    $('print').onclick = () => window.print();
+    $('print').onclick = () => {
+      if (DEMO) {
+        uiAlert('Cette version de démonstration ne peut pas ouvrir la fenêtre d’impression.\n\nDans l’application installée sur votre ordinateur, ce bouton imprime le document ou l’enregistre en PDF (choisissez « Enregistrer au format PDF »).', 'Imprimer / PDF');
+        return;
+      }
+      window.print();
+    };
     $('duplicate').onclick = () => {
       const copy = createDoc(doc.type, doc);
       toast('Copie créée : ' + copy.number);
       go('#/doc/' + copy.id);
     };
-    $('delete').onclick = () => {
-      if (deleteDoc(doc)) {
+    $('delete').onclick = async () => {
+      if (await deleteDoc(doc)) {
         toast('Document supprimé');
         go(doc.type === 'devis' ? '#/devis' : '#/factures');
       }
     };
     if ($('convert')) {
-      $('convert').onclick = () => {
+      $('convert').onclick = async () => {
         const existing = state.docs.find(d => d.fromDevisId === doc.id);
-        if (existing && !confirm('Une facture (' + existing.number + ') a déjà été créée depuis ce devis. En créer une autre ?')) return;
+        if (existing && !await uiConfirm('Une facture (' + existing.number + ') a déjà été créée depuis ce devis. En créer une autre ?', { confirmText: 'Créer une autre facture' })) return;
         const facture = convertToInvoice(doc);
         toast('Facture ' + facture.number + ' créée');
         go('#/doc/' + facture.id);
@@ -765,9 +958,7 @@
   // ---------------------------------------------------------------------------
 
   function renderClients(editId) {
-    const editing = editId === 'nouveau'
-      ? { id: '', name: '', contact: '', address: '', email: '', phone: '', siret: '', isPro: true }
-      : state.clients.find(c => c.id === editId);
+    const editing = editId === 'nouveau' ? emptyClient() : state.clients.find(c => c.id === editId);
 
     const list = state.clients.slice().sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 
@@ -780,14 +971,8 @@
       ${editing ? `
         <div class="card">
           <h2>${editing.id ? 'Modifier le client' : 'Nouveau client'}</h2>
-          <form id="client-form" class="grid cols-2">
-            <div class="field"><label for="c-name">Nom / Raison sociale *</label><input id="c-name" required value="${esc(editing.name)}"></div>
-            <div class="field"><label for="c-contact">Contact</label><input id="c-contact" value="${esc(editing.contact)}"></div>
-            <div class="field full"><label for="c-address">Adresse</label><textarea id="c-address" rows="2">${esc(editing.address)}</textarea></div>
-            <div class="field"><label for="c-email">E-mail</label><input id="c-email" type="email" value="${esc(editing.email)}"></div>
-            <div class="field"><label for="c-phone">Téléphone</label><input id="c-phone" value="${esc(editing.phone)}"></div>
-            <div class="field"><label for="c-siret">SIRET (si professionnel)</label><input id="c-siret" value="${esc(editing.siret)}"></div>
-            <label class="checkbox field"><input type="checkbox" id="c-pro" ${editing.isPro !== false ? 'checked' : ''}> Client professionnel</label>
+          <form id="client-form" class="grid cols-2" novalidate>
+            ${clientFieldsHTML(editing, 'c')}
             <div class="btn-row field full">
               <button class="btn primary" type="submit">Enregistrer</button>
               <a class="btn" href="#/clients">Annuler</a>
@@ -823,13 +1008,12 @@
     if (form) {
       form.onsubmit = e => {
         e.preventDefault();
-        const val = id => document.getElementById(id).value.trim();
-        const data = {
-          name: val('c-name'), contact: val('c-contact'), address: val('c-address'),
-          email: val('c-email'), phone: val('c-phone'), siret: val('c-siret'),
-          isPro: document.getElementById('c-pro').checked
-        };
-        if (!data.name) return;
+        const data = readClientFields(form, 'c');
+        if (!data.name) {
+          toast('Indiquez au moins le nom du client.');
+          document.getElementById('c-name').focus();
+          return;
+        }
         if (editing.id) {
           Object.assign(editing, data);
           // Met à jour les brouillons qui utilisent ce client.
@@ -845,8 +1029,8 @@
       };
       const del = document.getElementById('c-delete');
       if (del) {
-        del.onclick = () => {
-          if (!confirm('Supprimer le client « ' + editing.name + ' » ? Les documents existants sont conservés.')) return;
+        del.onclick = async () => {
+          if (!await uiConfirm('Supprimer le client « ' + editing.name + ' » ? Les documents existants sont conservés.', { confirmText: 'Supprimer', danger: true })) return;
           state.clients = state.clients.filter(c => c.id !== editing.id);
           save();
           toast('Client supprimé');
@@ -949,6 +1133,10 @@
     };
 
     document.getElementById('export').onclick = () => {
+      if (DEMO) {
+        uiAlert('Cette version de démonstration ne peut pas télécharger de fichier.\n\nDans l’application installée sur votre ordinateur, ce bouton enregistre une copie de toutes vos données.', 'Exporter');
+        return;
+      }
       const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -961,26 +1149,29 @@
 
     document.getElementById('import').onchange = e => {
       const file = e.target.files[0];
+      e.target.value = '';
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => {
+      reader.onload = async () => {
+        let data;
         try {
-          const data = JSON.parse(reader.result);
-          if (!data || !Array.isArray(data.docs)) throw new Error('format');
-          if (!confirm('Remplacer toutes les données actuelles par celles du fichier ?')) return;
-          state = normalize(data);
-          save();
-          toast('Données importées');
-          go('#/');
-        } catch (err) {
-          alert('Fichier invalide : ce n’est pas une sauvegarde DevFacs.');
+          data = JSON.parse(reader.result);
+        } catch (err) { /* traité ci-dessous */ }
+        if (!data || !Array.isArray(data.docs)) {
+          uiAlert('Ce fichier n’est pas une sauvegarde DevFacs. Choisissez un fichier créé avec le bouton « Exporter ».', 'Fichier invalide');
+          return;
         }
+        if (!await uiConfirm('Remplacer toutes les données actuelles par celles du fichier ?', { confirmText: 'Remplacer', danger: true })) return;
+        state = normalize(data);
+        save();
+        toast('Données importées');
+        go('#/');
       };
       reader.readAsText(file);
     };
 
-    document.getElementById('reset').onclick = () => {
-      if (!confirm('Effacer TOUTES les données (clients, devis, factures, paramètres) ? Cette action est irréversible.')) return;
+    document.getElementById('reset').onclick = async () => {
+      if (!await uiConfirm('Effacer TOUTES les données (clients, devis, factures, paramètres) ? Cette action est irréversible.', { title: 'Tout effacer', confirmText: 'Tout effacer', danger: true })) return;
       state = normalize(null);
       save();
       toast('Données effacées');
@@ -989,6 +1180,12 @@
   }
 
   // ---------------------------------------------------------------------------
+
+  // En démonstration, on ouvre directement sur l'exemple pour montrer l'application en action.
+  if (DEMO && isEmpty() && !state.settings.name) {
+    state = normalize(sampleData());
+    save();
+  }
 
   window.addEventListener('hashchange', route);
   route();
