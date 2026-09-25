@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Devis &amp; Factures</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar no-print">
+    <div class="brand">Devis<span>&amp;</span>Factures</div>
+    <nav id="nav">
+      <a href="#/" data-route="dashboard">Tableau de bord</a>
+      <a href="#/devis" data-route="devis">Devis</a>
+      <a href="#/factures" data-route="factures">Factures</a>
+      <a href="#/clients" data-route="clients">Clients</a>
+      <a href="#/parametres" data-route="parametres">Paramètres</a>
+    </nav>
+  </header>
+
+  <main id="app"></main>
+
+  <div id="toast" class="toast no-print" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
