@@ -40,6 +40,7 @@
     extraMentions: 'Dispensé d’immatriculation au registre du commerce et des sociétés (RCS) et au répertoire des métiers (RM).',
     revenueCap: 77700,
     contributionRate: 21.2,
+    docColor: '#2457d6',
     quotePrefix: 'D',
     invoicePrefix: 'F'
   };
@@ -162,6 +163,48 @@
   function num(value) {
     const n = parseFloat(String(value).replace(',', '.'));
     return Number.isFinite(n) ? n : 0;
+  }
+
+  // Couleurs proposées pour les devis et factures.
+  const DOC_COLORS = [
+    { name: 'Bleu', value: '#2457d6' },
+    { name: 'Turquoise', value: '#0f7c86' },
+    { name: 'Vert', value: '#1f7a4d' },
+    { name: 'Or', value: '#a87b12' },
+    { name: 'Orange', value: '#c2571a' },
+    { name: 'Bordeaux', value: '#9b1c31' },
+    { name: 'Violet', value: '#6b3fa0' },
+    { name: 'Noir', value: '#1d2330' }
+  ];
+
+  function validHex(value) {
+    return /^#[0-9a-f]{6}$/i.test(value || '') ? value.toLowerCase() : DEFAULT_SETTINGS.docColor;
+  }
+
+  // Mélange une couleur #rrggbb avec une autre (amount = part de la seconde, 0 à 1).
+  function mixHex(hex, other, amount) {
+    const a = hex.slice(1).match(/../g).map(h => parseInt(h, 16));
+    const b = other.slice(1).match(/../g).map(h => parseInt(h, 16));
+    return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * amount).toString(16).padStart(2, '0')).join('');
+  }
+
+  function luminance(hex) {
+    const [r, g, b] = hex.slice(1).match(/../g).map(h => {
+      const c = parseInt(h, 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  // Variables CSS du document : la couleur choisie, une teinte claire pour les fonds,
+  // et une version assombrie si besoin pour que le texte reste lisible sur fond blanc.
+  function docColorStyle(color) {
+    const accent = validHex(color);
+    let text = accent;
+    for (let i = 1; i <= 10 && (1.05 / (luminance(text) + 0.05)) < 4.5; i++) {
+      text = mixHex(accent, '#000000', i * 0.08);
+    }
+    return '--doc-accent:' + accent + ';--doc-accent-text:' + text + ';--doc-tint:' + mixHex(accent, '#ffffff', 0.88) + ';--doc-tint-strong:' + mixHex(accent, '#ffffff', 0.7);
   }
 
   function round2(n) {
@@ -885,7 +928,7 @@
     }
     if (s.extraMentions) mentions.push(s.extraMentions);
 
-    return `
+    return `<div class="doc" style="${docColorStyle(s.docColor)}">
       <div class="doc-head">
         <div class="issuer">
           <strong>${esc(me.name || 'Votre nom (à renseigner dans Paramètres)')}${me.name && !/\bEI\b/.test(me.name) ? ' EI' : ''}</strong><br>
@@ -950,7 +993,7 @@
       ${isQuote ? `<div class="signature"><div>Bon pour accord — date et signature du client :</div></div>` : ''}
 
       <div class="mentions">${esc(mentions.join('\n'))}</div>
-    `;
+    </div>`;
   }
 
   // ---------------------------------------------------------------------------
@@ -1108,6 +1151,21 @@
       </form>
 
       <div class="card" style="margin-top:24px">
+        <h2>Couleur des devis et factures</h2>
+        <p class="hint" style="margin-top:0">Choisissez la couleur de vos documents : titre, en-tête du tableau et totaux. Elle s’applique à tous vos devis et factures, et s’enregistre tout de suite.</p>
+        <div class="color-picker">
+          <div class="swatches" role="radiogroup" aria-label="Couleurs proposées">
+            ${DOC_COLORS.map(c => `<button type="button" class="swatch" role="radio" data-color="${c.value}" style="--sw:${c.value}" aria-checked="${validHex(s.docColor) === c.value}" title="${c.name}"><span class="sr-only">${c.name}</span></button>`).join('')}
+          </div>
+          <label class="custom-color" for="doc-color">
+            <input id="doc-color" type="color" value="${esc(validHex(s.docColor))}">
+            Autre couleur
+          </label>
+        </div>
+        <div class="color-preview"><div class="paper" id="color-preview"></div></div>
+      </div>
+
+      <div class="card" style="margin-top:24px">
         <h2>Sauvegarde</h2>
         <p class="hint" style="margin-top:0">Vos données sont enregistrées uniquement dans ce navigateur. Exportez-les régulièrement pour ne rien perdre, ou pour les transférer sur un autre appareil.</p>
         <div class="btn-row">
@@ -1117,6 +1175,24 @@
           <button class="btn danger" id="reset">Tout effacer</button>
         </div>
       </div>`;
+
+    const colorPreview = document.getElementById('color-preview');
+    const previewDoc = state.docs.slice().sort((a, b) => b.createdAt - a.createdAt)[0] || sampleData().docs[5];
+    function setDocColor(value, persist) {
+      s.docColor = validHex(value);
+      document.getElementById('doc-color').value = s.docColor;
+      app.querySelectorAll('.swatch').forEach(b => b.setAttribute('aria-checked', String(b.dataset.color === s.docColor)));
+      colorPreview.innerHTML = paperHTML(previewDoc);
+      if (persist) {
+        save();
+        toast('Couleur enregistrée');
+      }
+    }
+    app.querySelectorAll('.swatch').forEach(b => { b.onclick = () => setDocColor(b.dataset.color, true); });
+    const colorInput = document.getElementById('doc-color');
+    colorInput.oninput = () => setDocColor(colorInput.value, false);
+    colorInput.onchange = () => setDocColor(colorInput.value, true);
+    setDocColor(s.docColor, false);
 
     document.getElementById('settings-form').onsubmit = e => {
       e.preventDefault();

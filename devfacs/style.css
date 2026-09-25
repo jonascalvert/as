@@ -258,27 +258,51 @@ table.list tr.clickable:hover td { background: var(--hover); }
   font-size: 12px;
   line-height: 1.5;
   box-shadow: 0 2px 10px rgba(0, 0, 0, .05);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 .paper .doc-head { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
 .paper .issuer strong { font-size: 15px; }
 .paper .doc-title { text-align: right; }
-.paper .doc-title h2 { font-size: 22px; margin: 0; letter-spacing: 1px; color: #2457d6; }
+.paper .doc { border-top: 5px solid var(--doc-accent, #2457d6); padding-top: 18px; }
+.paper .doc-title h2 { font-size: 22px; margin: 0; letter-spacing: 1px; color: var(--doc-accent-text, #2457d6); }
 .paper .doc-title .meta { margin-top: 6px; }
-.paper .client-box { margin-left: auto; width: 55%; border: 1px solid #ddd; border-radius: 6px; padding: 10px 14px; margin-bottom: 24px; }
-.paper .client-box .lbl { font-size: 10px; text-transform: uppercase; color: #888; letter-spacing: .5px; }
+.paper .client-box { margin-left: auto; width: 55%; border: 1px solid var(--doc-tint-strong, #ddd); border-radius: 6px; padding: 10px 14px; margin-bottom: 24px; }
+.paper .client-box .lbl { font-size: 10px; text-transform: uppercase; color: var(--doc-accent-text, #888); letter-spacing: .5px; font-weight: 600; }
 .paper .subject { margin-bottom: 12px; }
 .paper table.items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-.paper table.items th { background: #f1f3f7; text-align: left; padding: 6px 8px; font-size: 11px; }
+.paper table.items th { background: var(--doc-tint, #f1f3f7); color: var(--doc-accent-text, #111); text-align: left; padding: 6px 8px; font-size: 11px; }
 .paper table.items td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: top; white-space: pre-wrap; }
 .paper table.items .r { text-align: right; white-space: nowrap; }
 .paper .totals { margin-left: auto; width: 45%; }
 .paper .totals div { display: flex; justify-content: space-between; padding: 3px 0; }
-.paper .totals .grand { border-top: 2px solid #111; margin-top: 4px; padding-top: 6px; font-weight: 700; font-size: 14px; }
+.paper .totals .grand { border-top: 2px solid var(--doc-accent, #111); color: var(--doc-accent-text, #111); margin-top: 4px; padding-top: 6px; font-weight: 700; font-size: 14px; }
 .paper .mentions { margin-top: 24px; font-size: 10.5px; color: #444; white-space: pre-wrap; }
 .paper .notes { margin-top: 16px; white-space: pre-wrap; }
 .paper .signature { margin-top: 24px; display: flex; justify-content: flex-end; }
-.paper .signature div { border: 1px dashed #aaa; width: 55%; height: 90px; padding: 8px; font-size: 11px; color: #555; }
+.paper .signature div { border: 1px dashed var(--doc-accent, #aaa); width: 55%; height: 90px; padding: 8px; font-size: 11px; color: #555; }
 .paper .paid-stamp { display: inline-block; margin-top: 12px; border: 2px solid #1f8a4c; color: #1f8a4c; padding: 4px 12px; font-weight: 700; transform: rotate(-4deg); }
+
+/* ---------- Couleur des documents ---------- */
+.color-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-bottom: 16px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.swatch {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--sw);
+  border: 3px solid var(--card);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer; padding: 0;
+}
+.swatch[aria-checked="true"] { box-shadow: 0 0 0 3px var(--text); }
+.swatch:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; }
+.custom-color { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); font-size: 14px; cursor: pointer; }
+.custom-color input { width: 44px; height: 36px; padding: 2px; cursor: pointer; }
+.color-preview { max-height: 600px; overflow: hidden; border-radius: 4px; position: relative; }
+.color-preview::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 80px;
+  background: linear-gradient(to bottom, transparent, var(--card));
+}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
 
 /* ---------- Fenêtres de dialogue ---------- */
 .modal-backdrop {
