@@ -1,5 +1,5 @@
 /* DevFacs — service worker : permet d'utiliser l'application sans connexion. */
-const CACHE = 'devfacs-v1';
+const CACHE = 'devfacs-v2';
 const FILES = [
   './',
   './index.html',

@@ -1,10 +1,12 @@
 # DevFacs — devis & factures pour auto-entrepreneur
 
 **DevFacs** est une application web simple pour faire vos **devis** et **factures** en quelques clics.
-Gratuit, sans compte : vos données restent sur votre appareil.
+Gratuit : vos données restent sur votre appareil, protégées par votre mot de passe.
 
 ## Fonctionnalités
 
+- **Comptes utilisateur** : page de connexion, création de compte, « Rester connecté », changement de mot de passe, suppression du compte. Plusieurs personnes peuvent avoir chacune leur compte sur le même appareil. Les données de chaque compte sont **chiffrées avec son mot de passe** (AES-GCM, clé dérivée par PBKDF2) et ne quittent jamais l’appareil.
+- **Tableau de bord personnel** : message d’accueil, chiffres clés, liste « À faire » (factures en retard, échéances proches, devis à relancer ou expirés, brouillons) et graphique du chiffre d’affaires encaissé sur 12 mois.
 - **Devis** et **factures** avec numérotation automatique et continue (`D-2026-001`, `F-2026-001`).
 - **Transformer un devis en facture** en un clic (le devis passe en « Accepté »).
 - **Logo** sur les devis et factures (PNG, JPG ou SVG, trois tailles).
@@ -17,7 +19,7 @@ Gratuit, sans compte : vos données restent sur votre appareil.
   - validité du devis et zone « Bon pour accord ».
 - Suivi des statuts : brouillon, envoyé, accepté/refusé, à payer, payée, annulée, **en retard**.
 - **Clients** : carnet d’adresses réutilisable, avec boutons **Modifier** et **Supprimer** (aussi depuis un devis ou une facture).
-- **Tableau de bord** : CA encaissé de l’année, progression vers le plafond micro-entreprise,
+- **Chiffres clés** : CA encaissé de l’année, progression vers le plafond micro-entreprise,
   estimation des cotisations URSSAF, montants à encaisser, devis en attente.
 - **Sauvegarde** : export / import JSON.
 - **Exemple intégré** : bouton « Voir un exemple » pour découvrir l’application avec des données fictives, puis « Effacer l’exemple » pour commencer.
@@ -27,9 +29,10 @@ Gratuit, sans compte : vos données restent sur votre appareil.
 
 **En ligne** : ouvrez https://jonascalvert.github.io/as/ dans votre navigateur.
 
-1. Allez dans **Paramètres** et remplissez vos informations (nom, adresse, SIRET, IBAN…), puis ajoutez votre logo et choisissez votre couleur.
-2. Ajoutez un client, puis créez un devis ou une facture.
-3. Cliquez sur **Imprimer / PDF** puis choisissez « Enregistrer au format PDF ».
+1. Créez votre compte (nom, e-mail, mot de passe).
+2. Allez dans **Paramètres** et remplissez vos informations (nom, adresse, SIRET, IBAN…), puis ajoutez votre logo et choisissez votre couleur.
+3. Ajoutez un client, puis créez un devis ou une facture.
+4. Cliquez sur **Imprimer / PDF** puis choisissez « Enregistrer au format PDF ».
 
 **Installer sur téléphone ou ordinateur** (fonctionne ensuite sans connexion) :
 
@@ -38,7 +41,8 @@ Gratuit, sans compte : vos données restent sur votre appareil.
 
 **Sans internet** : vous pouvez aussi télécharger le dossier `devfacs/` et ouvrir `index.html`.
 
-> Les données restent **uniquement dans votre navigateur** (localStorage).
+> Les données restent **uniquement sur votre appareil**, chiffrées avec votre mot de passe.
+> **Mot de passe oublié = données perdues** : personne ne peut le réinitialiser.
 > Pensez à faire **Paramètres → Exporter** régulièrement pour garder une copie.
 
 Le plafond de chiffre d’affaires et le taux de cotisations sont réglables dans les paramètres :

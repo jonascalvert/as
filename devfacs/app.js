@@ -1,9 +1,14 @@
 /* DevFacs — application simple de devis et factures pour auto-entrepreneur.
- * Tout est stocké dans le navigateur (localStorage). Aucune installation. */
+ * Chaque compte est stocké sur l'appareil (localStorage), chiffré avec son mot de passe. */
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'devfacs:v1';
+  // Ancien stockage (avant les comptes) : repris par le premier compte créé.
+  const LEGACY_KEY = 'devfacs:v1';
+  const ACCOUNTS_KEY = 'devfacs:accounts';
+  const REMEMBER_KEY = 'devfacs:remember';
+  const dataKey = id => 'devfacs:data:' + id;
+  const PBKDF2_ITERATIONS = 250000;
   // Version de démonstration en ligne : pas d'impression ni de téléchargement possibles.
   const DEMO = !!window.DEVFACS_DEMO;
 
@@ -51,15 +56,9 @@
   // Données
   // ---------------------------------------------------------------------------
 
-  let state = load();
-
-  function load() {
-    let data = null;
-    try {
-      data = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    } catch (e) { /* stockage indisponible ou corrompu */ }
-    return normalize(data);
-  }
+  // Session ouverte : { account, key, salt } ; key est la clé dérivée du mot de passe avec salt.
+  let session = null;
+  let state = normalize(null);
 
   function normalize(data) {
     data = data && typeof data === 'object' ? data : {};
@@ -71,14 +70,272 @@
     };
   }
 
+  // Enregistre les données du compte connecté (chiffrées). Les appels rapprochés sont regroupés.
+  let saving = null;
+  let saveAgain = false;
+
   function save() {
+    if (!session) return Promise.resolve(false);
+    if (session.demo) return Promise.resolve(true);
+    if (saving) {
+      saveAgain = true;
+      return saving;
+    }
+    saving = (async () => {
+      let ok = false;
+      do {
+        saveAgain = false;
+        try {
+          const payload = await encryptJSON(session.key, session.salt, state);
+          localStorage.setItem(dataKey(session.account.id), payload);
+          ok = true;
+        } catch (e) {
+          ok = false;
+          toast('Impossible d’enregistrer : stockage du navigateur indisponible ou plein.');
+        }
+      } while (saveAgain);
+      saving = null;
+      return ok;
+    })();
+    return saving;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Comptes et chiffrement
+  // ---------------------------------------------------------------------------
+
+  const textEncoder = new TextEncoder();
+  const textDecoder = new TextDecoder();
+
+  function toB64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+  }
+
+  function fromB64(text) {
+    const bin = atob(text);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  function cryptoAvailable() {
+    return !!(window.crypto && crypto.subtle);
+  }
+
+  async function deriveKey(password, saltB64) {
+    const base = await crypto.subtle.importKey('raw', textEncoder.encode(password), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: fromB64(saltB64), iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+      base,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+
+  // Le sel est rangé avec les données : un changement de mot de passe s'écrit en une seule fois.
+  async function encryptJSON(key, salt, value) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, textEncoder.encode(JSON.stringify(value)));
+    return JSON.stringify({ v: 1, salt, iv: toB64(iv), data: toB64(data) });
+  }
+
+  function readBox(id) {
+    const box = JSON.parse(localStorage.getItem(dataKey(id)));
+    if (!box || !box.salt || !box.iv || !box.data) throw new Error('missing');
+    return box;
+  }
+
+  // Échoue si la clé est mauvaise (mauvais mot de passe) : AES-GCM vérifie l'intégrité.
+  async function decryptBox(key, box) {
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(box.iv) }, key, fromB64(box.data));
+    return JSON.parse(textDecoder.decode(plain));
+  }
+
+  function readAccounts() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      const list = JSON.parse(localStorage.getItem(ACCOUNTS_KEY));
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function writeAccounts(list) {
+    try {
+      localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(list));
       return true;
     } catch (e) {
-      toast('Impossible d’enregistrer : stockage du navigateur indisponible ou plein.');
       return false;
     }
+  }
+
+  function readLegacy() {
+    try {
+      const data = JSON.parse(localStorage.getItem(LEGACY_KEY));
+      return data && typeof data === 'object' && (Array.isArray(data.docs) || Array.isArray(data.clients)) ? data : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function findAccount(email) {
+    const wanted = String(email || '').trim().toLowerCase();
+    return readAccounts().find(a => a.email === wanted);
+  }
+
+  // Préremplit le nom et l'e-mail de l'entreprise avec ceux du compte s'ils sont vides.
+  function prefillFromAccount(account) {
+    if (!state.settings.name) state.settings.name = account.name;
+    if (!state.settings.email) state.settings.email = account.email;
+  }
+
+  async function createAccount(name, email, password) {
+    const account = {
+      id: uid(),
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      createdAt: Date.now(),
+      lastLogin: Date.now()
+    };
+    const salt = toB64(crypto.getRandomValues(new Uint8Array(16)));
+    const key = await deriveKey(password, salt);
+    const legacy = readLegacy();
+    state = normalize(legacy);
+    prefillFromAccount(account);
+    localStorage.setItem(dataKey(account.id), await encryptJSON(key, salt, state));
+    const accounts = readAccounts();
+    accounts.push(account);
+    if (!writeAccounts(accounts)) {
+      localStorage.removeItem(dataKey(account.id));
+      throw new Error('storage');
+    }
+    if (legacy) {
+      try { localStorage.removeItem(LEGACY_KEY); } catch (e) { /* sans gravité */ }
+    }
+    session = { account, key, salt };
+    return { imported: !!legacy };
+  }
+
+  async function login(email, password) {
+    const account = findAccount(email);
+    if (!account) throw new Error('unknown');
+    let box;
+    try {
+      box = readBox(account.id);
+    } catch (e) {
+      throw new Error('missing');
+    }
+    const key = await deriveKey(password, box.salt);
+    let data;
+    try {
+      data = await decryptBox(key, box);
+    } catch (e) {
+      throw new Error('password');
+    }
+    state = normalize(data);
+    session = { account, key, salt: box.salt };
+    touchLastLogin(account.id);
+  }
+
+  function touchLastLogin(id) {
+    const accounts = readAccounts();
+    const a = accounts.find(x => x.id === id);
+    if (a) {
+      a.lastLogin = Date.now();
+      writeAccounts(accounts);
+    }
+  }
+
+  async function changePassword(oldPassword, newPassword) {
+    const box = readBox(session.account.id);
+    try {
+      await decryptBox(await deriveKey(oldPassword, box.salt), box);
+    } catch (e) {
+      throw new Error('password');
+    }
+    const salt = toB64(crypto.getRandomValues(new Uint8Array(16)));
+    const key = await deriveKey(newPassword, salt);
+    // Termine l'enregistrement en cours, puis bascule sur la nouvelle clé avant d'écrire.
+    await saving;
+    session.key = key;
+    session.salt = salt;
+    if (!await save()) throw new Error('storage');
+    if (localStorage.getItem(REMEMBER_KEY) === session.account.id) await rememberSession();
+  }
+
+  function deleteAccountData(id) {
+    try { localStorage.removeItem(dataKey(id)); } catch (e) { /* déjà absent */ }
+    writeAccounts(readAccounts().filter(a => a.id !== id));
+    forgetSession(id);
+  }
+
+  // « Rester connecté » : la clé (non exportable) est gardée dans IndexedDB sur cet appareil.
+  function openKeyStore() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) return reject(new Error('indexeddb'));
+      const req = indexedDB.open('devfacs', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('keys');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function keyStore(mode, fn) {
+    const db = await openKeyStore();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('keys', mode);
+      const req = fn(tx.objectStore('keys'));
+      tx.oncomplete = () => { db.close(); resolve(req && req.result); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    });
+  }
+
+  async function rememberSession() {
+    try {
+      await keyStore('readwrite', store => store.put(session.key, session.account.id));
+      localStorage.setItem(REMEMBER_KEY, session.account.id);
+    } catch (e) { /* on reste simplement connecté jusqu'à la fermeture */ }
+  }
+
+  function forgetSession(id) {
+    try {
+      if (!id || localStorage.getItem(REMEMBER_KEY) === id) localStorage.removeItem(REMEMBER_KEY);
+    } catch (e) { /* rien à oublier */ }
+    if (id) keyStore('readwrite', store => store.delete(id)).catch(() => {});
+  }
+
+  async function restoreSession() {
+    let id;
+    try { id = localStorage.getItem(REMEMBER_KEY); } catch (e) { return false; }
+    const account = id && readAccounts().find(a => a.id === id);
+    if (!account || !cryptoAvailable()) return false;
+    try {
+      const key = await keyStore('readonly', store => store.get(id));
+      if (!key) return false;
+      const box = readBox(id);
+      state = normalize(await decryptBox(key, box));
+      session = { account, key, salt: box.salt };
+      touchLastLogin(id);
+      return true;
+    } catch (e) {
+      forgetSession(id);
+      return false;
+    }
+  }
+
+  function logout() {
+    if (session && !session.demo) forgetSession(session.account.id);
+    session = null;
+    state = normalize(null);
+    updateAccountBar();
+    toast('Vous êtes déconnecté');
+    go('#/connexion');
   }
 
   // Données d'exemple pour découvrir l'application (noms et montants fictifs).
@@ -544,6 +801,16 @@
   function route() {
     const hash = location.hash.replace(/^#\/?/, '');
     const [page, id] = hash.split('/');
+    updateAccountBar();
+    const authPage = page === 'connexion' || page === 'inscription';
+    if (!session) {
+      window.scrollTo(0, 0);
+      return renderAuth(page === 'inscription' ? 'inscription' : 'connexion');
+    }
+    if (authPage) {
+      location.hash = '#/';
+      return;
+    }
     const active = { '': 'dashboard', devis: 'devis', factures: 'factures', clients: 'clients', parametres: 'parametres', doc: null }[page];
     document.querySelectorAll('#nav a').forEach(a => {
       const doc = page === 'doc' ? findDoc(id) : null;
@@ -569,8 +836,341 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Connexion et création de compte
+  // ---------------------------------------------------------------------------
+
+  function initials(name) {
+    return String(name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+  }
+
+  function firstName(name) {
+    return String(name || '').trim().split(/\s+/)[0] || '';
+  }
+
+  document.getElementById('logout').onclick = () => logout();
+
+  function updateAccountBar() {
+    const bar = document.getElementById('account');
+    const nav = document.getElementById('nav');
+    if (!bar || !nav) return;
+    nav.hidden = !session;
+    bar.hidden = !session;
+    if (session) {
+      document.getElementById('account-avatar').textContent = initials(session.account.name);
+      document.getElementById('account-name').textContent = session.account.name;
+    }
+  }
+
+  function passwordField(id, label, autocomplete) {
+    return `
+      <div class="field">
+        <label for="${id}">${label}</label>
+        <div class="password-wrap">
+          <input id="${id}" type="password" autocomplete="${autocomplete}">
+          <button type="button" class="pw-toggle" data-toggle="${id}" aria-label="Afficher le mot de passe">Afficher</button>
+        </div>
+      </div>`;
+  }
+
+  function renderAuth(mode) {
+    const signup = mode === 'inscription';
+    const accounts = readAccounts().slice().sort((a, b) => (b.lastLogin || 0) - (a.lastLogin || 0));
+    const legacy = signup && readLegacy();
+    const noCrypto = !cryptoAvailable();
+
+    app.innerHTML = `
+      <div class="auth">
+        <div class="auth-card">
+          <div class="auth-brand">Dev<span>Facs</span></div>
+          <p class="auth-tag">Devis et factures faciles pour auto-entrepreneur</p>
+          <h1>${signup ? 'Créer un compte' : 'Connexion'}</h1>
+
+          ${noCrypto ? `<div class="alert">Ce navigateur ne permet pas de protéger vos données ici. Ouvrez DevFacs depuis son adresse sécurisée (https) ou avec un navigateur récent.</div>` : ''}
+
+          ${!signup && accounts.length ? `
+            <div class="account-pick">
+              <div class="label-sm">Comptes sur cet appareil</div>
+              ${accounts.map(a => `
+                <button type="button" class="account-chip" data-email="${esc(a.email)}">
+                  <span class="avatar">${esc(initials(a.name))}</span>
+                  <span><strong>${esc(a.name)}</strong><span class="hint">${esc(a.email)}</span></span>
+                </button>`).join('')}
+            </div>` : ''}
+
+          ${legacy ? `<div class="alert info">Des devis, factures ou clients sont déjà enregistrés sur cet appareil. Ils seront ajoutés à ce nouveau compte.</div>` : ''}
+
+          <form id="auth-form" class="grid" novalidate>
+            ${signup ? `<div class="field"><label for="a-name">Votre nom</label><input id="a-name" autocomplete="name" placeholder="Marie Joseph"></div>` : ''}
+            <div class="field"><label for="a-email">E-mail</label><input id="a-email" type="email" autocomplete="${signup ? 'email' : 'username'}" placeholder="vous@exemple.fr"></div>
+            ${passwordField('a-password', 'Mot de passe', signup ? 'new-password' : 'current-password')}
+            ${signup ? passwordField('a-confirm', 'Confirmer le mot de passe', 'new-password') : ''}
+            ${signup ? '<p class="hint" style="margin:-4px 0 0">Au moins 8 caractères.</p>' : ''}
+            <label class="checkbox"><input type="checkbox" id="a-remember" checked> Rester connecté sur cet appareil</label>
+            <div class="form-error" id="auth-error" role="alert" hidden></div>
+            <button class="btn primary auth-submit" type="submit" ${noCrypto ? 'disabled' : ''}>${signup ? 'Créer mon compte' : 'Se connecter'}</button>
+          </form>
+
+          ${signup ? `
+            <div class="alert warn-soft">
+              <strong>Important :</strong> vos données sont chiffrées avec votre mot de passe. S’il est oublié, elles ne peuvent pas être récupérées. Pensez à exporter une sauvegarde de temps en temps (Paramètres → Exporter).
+            </div>
+            <p class="auth-switch">Déjà un compte ? <a href="#/connexion">Se connecter</a></p>
+          ` : `
+            <p class="auth-switch">Pas encore de compte ? <a href="#/inscription">Créer un compte</a></p>
+            <p class="auth-switch"><button type="button" class="link-btn" id="forgot">Mot de passe oublié ?</button></p>
+          `}
+
+          ${DEMO ? `<div class="auth-demo"><button type="button" class="btn" id="demo-login">Essayer la démo sans compte</button></div>` : ''}
+        </div>
+        <p class="auth-note">Vos données restent sur cet appareil. Rien n’est envoyé sur internet.</p>
+      </div>`;
+
+    const $ = id => document.getElementById(id);
+    const errorBox = $('auth-error');
+    const submit = app.querySelector('.auth-submit');
+    const showError = msg => {
+      errorBox.textContent = msg;
+      errorBox.hidden = false;
+    };
+
+    app.querySelectorAll('[data-toggle]').forEach(btn => {
+      btn.onclick = () => {
+        const input = $(btn.dataset.toggle);
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        btn.textContent = show ? 'Masquer' : 'Afficher';
+        btn.setAttribute('aria-label', show ? 'Masquer le mot de passe' : 'Afficher le mot de passe');
+      };
+    });
+    app.querySelectorAll('[data-email]').forEach(btn => {
+      btn.onclick = () => {
+        $('a-email').value = btn.dataset.email;
+        $('a-password').focus();
+      };
+    });
+
+    $('auth-form').onsubmit = async e => {
+      e.preventDefault();
+      errorBox.hidden = true;
+      const email = $('a-email').value.trim();
+      const password = $('a-password').value;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError('Indiquez une adresse e-mail valide.');
+      if (signup) {
+        const name = $('a-name').value.trim();
+        if (!name) return showError('Indiquez votre nom.');
+        if (password.length < 8) return showError('Le mot de passe doit contenir au moins 8 caractères.');
+        if (password !== $('a-confirm').value) return showError('Les deux mots de passe ne sont pas identiques.');
+        if (findAccount(email)) return showError('Un compte existe déjà avec cet e-mail sur cet appareil. Connectez-vous.');
+      } else if (!password) {
+        return showError('Indiquez votre mot de passe.');
+      }
+
+      const label = submit.textContent;
+      submit.disabled = true;
+      submit.textContent = signup ? 'Création du compte…' : 'Connexion…';
+      try {
+        let imported = false;
+        if (signup) imported = (await createAccount($('a-name').value, email, password)).imported;
+        else await login(email, password);
+        if ($('a-remember').checked) await rememberSession();
+        toast(signup
+          ? (imported ? 'Compte créé. Vos documents existants ont été ajoutés.' : 'Bienvenue, ' + firstName(session.account.name) + ' !')
+          : 'Bonjour, ' + firstName(session.account.name) + ' !');
+        go('#/');
+      } catch (err) {
+        submit.disabled = false;
+        submit.textContent = label;
+        const messages = {
+          unknown: 'Aucun compte avec cet e-mail sur cet appareil. Vérifiez l’adresse ou créez un compte.',
+          password: 'Mot de passe incorrect.',
+          missing: 'Les données de ce compte sont introuvables sur cet appareil.',
+          storage: 'Impossible d’enregistrer le compte : le stockage du navigateur est plein ou bloqué.'
+        };
+        showError(messages[err.message] || 'Une erreur est survenue. Réessayez.');
+        if (err.message === 'password') $('a-password').select();
+      }
+    };
+
+    const forgot = $('forgot');
+    if (forgot) {
+      forgot.onclick = async () => {
+        const account = findAccount($('a-email').value);
+        const text = 'Vos données sont chiffrées avec votre mot de passe : personne ne peut le retrouver ni le réinitialiser, pas même DevFacs.\n\n'
+          + 'Si vous avez exporté une sauvegarde, vous pouvez créer un nouveau compte puis l’importer (Paramètres → Importer).';
+        if (!account) {
+          uiAlert(text + '\n\nPour supprimer un compte oublié, saisissez d’abord son e-mail.', 'Mot de passe oublié');
+          return;
+        }
+        const ok = await uiConfirm(text + '\n\nVous pouvez aussi supprimer le compte « ' + account.email + ' » et toutes ses données de cet appareil.',
+          { title: 'Mot de passe oublié', confirmText: 'Supprimer ce compte', cancelText: 'Fermer', danger: true });
+        if (!ok) return;
+        deleteAccountData(account.id);
+        toast('Compte supprimé de cet appareil');
+        renderAuth('connexion');
+      };
+    }
+
+    const demo = $('demo-login');
+    if (demo) {
+      demo.onclick = () => {
+        session = { account: { id: 'demo', name: 'Visiteur Démo', email: '' }, demo: true };
+        state = normalize(sampleData());
+        go('#/');
+      };
+    }
+
+    (signup ? $('a-name') : ($('a-email').value ? $('a-password') : $('a-email'))).focus();
+  }
+
+  // ---------------------------------------------------------------------------
   // Tableau de bord
   // ---------------------------------------------------------------------------
+
+  function daysBetween(fromISO, toISO) {
+    const [y1, m1, d1] = fromISO.split('-').map(Number);
+    const [y2, m2, d2] = toISO.split('-').map(Number);
+    return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+  }
+
+  // Liste « À faire » : ce qui demande une action, du plus urgent au moins urgent.
+  function todoHTML() {
+    const today = todayISO();
+    const items = [];
+    const who = d => (d.client ? d.client.name : 'client non renseigné');
+    state.docs.forEach(d => {
+      if (d.type === 'facture' && d.status === 'envoye' && d.dueDate) {
+        const days = daysBetween(d.dueDate, today);
+        if (days > 0) {
+          items.push({ rank: 0, d, tag: 'retard', tagLabel: 'En retard', text: 'Relancer ' + who(d) + ' — facture ' + d.number + ', en retard de ' + days + ' jour' + (days > 1 ? 's' : '') });
+        } else if (days >= -7) {
+          items.push({ rank: 1, d, tag: 'envoye', tagLabel: 'Échéance', text: 'Facture ' + d.number + ' (' + who(d) + ') à encaisser ' + (days === 0 ? 'aujourd’hui' : 'le ' + fmtDate(d.dueDate)) });
+        }
+      }
+      if (d.type === 'devis' && d.status === 'envoye') {
+        const age = daysBetween(d.date, today);
+        if (d.validUntil && d.validUntil < today) {
+          items.push({ rank: 2, d, tag: 'refuse', tagLabel: 'Expiré', text: 'Devis ' + d.number + ' (' + who(d) + ') expiré le ' + fmtDate(d.validUntil) + ' : relancer ou classer' });
+        } else if (age >= 14) {
+          items.push({ rank: 3, d, tag: 'envoye', tagLabel: 'Relance', text: 'Relancer ' + who(d) + ' pour le devis ' + d.number + ', envoyé il y a ' + age + ' jours' });
+        }
+      }
+      if (d.status === 'brouillon') {
+        items.push({ rank: 4, d, tag: 'brouillon', tagLabel: 'Brouillon', text: (d.type === 'devis' ? 'Terminer le devis ' : 'Terminer la facture ') + d.number + (d.client ? ' pour ' + d.client.name : '') });
+      }
+    });
+    if (!items.length) return '<div class="empty small">Rien d’urgent. Tout est à jour.</div>';
+    items.sort((a, b) => a.rank - b.rank || b.d.createdAt - a.d.createdAt);
+    const shown = items.slice(0, 6);
+    return `
+      <ul class="todo">
+        ${shown.map(it => `
+          <li data-open="${esc(it.d.id)}" tabindex="0">
+            <span class="badge ${it.tag}">${it.tagLabel}</span>
+            <span class="todo-text">${esc(it.text)}</span>
+            <span class="todo-amount">${money(totals(it.d).ttc)}</span>
+          </li>`).join('')}
+      </ul>
+      ${items.length > shown.length ? `<p class="hint">Et ${items.length - shown.length} autre(s) élément(s).</p>` : ''}`;
+  }
+
+  function niceMax(value) {
+    if (value <= 0) return 1000;
+    const pow = Math.pow(10, Math.floor(Math.log10(value)));
+    for (const m of [1, 2, 2.5, 5, 10]) {
+      if (m * pow >= value) return m * pow;
+    }
+    return 10 * pow;
+  }
+
+  function compactMoney(n) {
+    try {
+      return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: state.settings.currency || 'EUR', notation: 'compact', maximumFractionDigits: 1 }).format(n);
+    } catch (e) {
+      return money(n);
+    }
+  }
+
+  function revenueByMonth() {
+    const now = new Date();
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        key: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'),
+        short: d.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', ''),
+        long: d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }),
+        total: 0,
+        count: 0
+      });
+    }
+    state.docs.forEach(d => {
+      if (d.type !== 'facture' || d.status !== 'payee') return;
+      const m = months.find(x => x.key === (d.paidDate || d.date).slice(0, 7));
+      if (m) {
+        m.total = round2(m.total + totals(d).ttc);
+        m.count++;
+      }
+    });
+    return months;
+  }
+
+  // Histogramme en HTML/CSS (s'adapte à la largeur du téléphone), avec info-bulle et tableau.
+  function revenueChartHTML() {
+    const months = revenueByMonth();
+    const max = niceMax(Math.max.apply(null, months.map(m => m.total)));
+    const peak = months.reduce((best, m, i) => (m.total > months[best].total ? i : best), 0);
+    const sum = months.reduce((t, m) => t + m.total, 0);
+    return `
+      <div class="chart" id="revenue-chart">
+        <div class="chart-plot" role="img" aria-label="${esc('Chiffre d’affaires encaissé sur 12 mois : ' + money(sum) + ' au total')}">
+          ${[0, 0.5, 1].map(f => `<div class="chart-gl" style="bottom:${f * 100}%"><span>${esc(compactMoney(max * f))}</span></div>`).join('')}
+          <div class="chart-bars">
+            ${months.map((m, i) => `
+              <div class="chart-col" data-i="${i}" tabindex="0" aria-label="${esc(m.long + ' : ' + money(m.total))}">
+                ${i === peak && m.total > 0 ? `<span class="chart-cap" style="bottom:${(m.total / max) * 100}%">${esc(compactMoney(m.total))}</span>` : ''}
+                <div class="chart-bar${i === 11 ? ' current' : ''}" style="height:${m.total > 0 ? Math.max(1, (m.total / max) * 100) : 0}%"></div>
+              </div>`).join('')}
+          </div>
+        </div>
+        <div class="chart-x">${months.map(m => `<span>${esc(m.short)}</span>`).join('')}</div>
+        <div class="chart-tip" id="chart-tip" hidden></div>
+        <details class="chart-table">
+          <summary>Voir les montants</summary>
+          <div class="table-wrap"><table class="list">
+            <thead><tr><th>Mois</th><th class="num">Factures payées</th><th class="num">Montant</th></tr></thead>
+            <tbody>${months.slice().reverse().map(m => `<tr><td>${esc(m.long)}</td><td class="num">${m.count}</td><td class="num">${money(m.total)}</td></tr>`).join('')}</tbody>
+          </table></div>
+        </details>
+      </div>`;
+  }
+
+  function bindRevenueChart() {
+    const chart = document.getElementById('revenue-chart');
+    if (!chart) return;
+    const months = revenueByMonth();
+    const tip = document.getElementById('chart-tip');
+    const show = col => {
+      const m = months[Number(col.dataset.i)];
+      tip.innerHTML = `<strong>${esc(m.long)}</strong><br>${money(m.total)}<br><span>${m.count} facture${m.count > 1 ? 's' : ''} payée${m.count > 1 ? 's' : ''}</span>`;
+      tip.hidden = false;
+      const box = chart.getBoundingClientRect();
+      const c = col.getBoundingClientRect();
+      const left = Math.min(Math.max(c.left - box.left + c.width / 2 - tip.offsetWidth / 2, 0), box.width - tip.offsetWidth);
+      tip.style.left = left + 'px';
+      chart.querySelectorAll('.chart-col').forEach(x => x.classList.toggle('hover', x === col));
+    };
+    const hide = () => {
+      tip.hidden = true;
+      chart.querySelectorAll('.chart-col').forEach(x => x.classList.remove('hover'));
+    };
+    chart.querySelectorAll('.chart-col').forEach(col => {
+      col.onmouseenter = () => show(col);
+      col.onfocus = () => show(col);
+      col.onclick = () => show(col);
+      col.onblur = hide;
+    });
+    chart.querySelector('.chart-bars').onmouseleave = hide;
+  }
 
   function renderDashboard() {
     const s = state.settings;
@@ -593,18 +1193,22 @@
     const contributions = round2(paidThisYear * num(s.contributionRate) / 100);
 
     const recent = state.docs.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 8);
+    const today = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
     app.innerHTML = `
       <div class="page-head">
-        <h1>Tableau de bord</h1>
+        <div>
+          <h1>Bonjour, ${esc(firstName(session.account.name))}</h1>
+          <p class="subtitle">${esc(today.charAt(0).toUpperCase() + today.slice(1))}</p>
+        </div>
         <div class="btn-row">
           <button class="btn primary" data-new="devis">+ Nouveau devis</button>
           <button class="btn primary" data-new="facture">+ Nouvelle facture</button>
         </div>
       </div>
 
-      ${!s.name ? `<div class="alert info">Bienvenue ! Commencez par renseigner vos informations (nom, SIRET, adresse…) dans <a href="#/parametres">Paramètres</a> : elles apparaîtront sur vos devis et factures.
-        ${isEmpty() ? `<div class="btn-row" style="margin-top:10px"><button class="btn small" id="load-sample">Voir un exemple</button></div>` : ''}</div>` : ''}
+      ${isEmpty() ? `<div class="alert info">Bienvenue ! Complétez vos informations (SIRET, adresse, IBAN…) dans <a href="#/parametres">Paramètres</a> : elles apparaîtront sur vos devis et factures. Vous pouvez aussi découvrir l’application avec des données fictives.
+        <div class="btn-row" style="margin-top:10px"><button class="btn small" id="load-sample">Voir un exemple</button></div></div>` : ''}
       ${isSample() ? `<div class="alert info">Vous regardez des <strong>données d’exemple</strong>. Quand vous êtes prêt, cliquez sur <button class="btn small" id="clear-sample">Effacer l’exemple</button> pour commencer avec vos propres informations.</div>` : ''}
       ${late.length ? `<div class="alert">${late.length} facture(s) en retard de paiement pour ${money(late.reduce((sum, d) => sum + totals(d).ttc, 0))}.</div>` : ''}
 
@@ -632,6 +1236,18 @@
         </div>
       </div>
 
+      <div class="dash-grid">
+        <div class="card">
+          <h2>À faire</h2>
+          ${todoHTML()}
+        </div>
+        <div class="card">
+          <h2>Chiffre d’affaires encaissé</h2>
+          <p class="hint chart-sub">12 derniers mois, factures payées (date de paiement)</p>
+          ${revenueChartHTML()}
+        </div>
+      </div>
+
       <div class="card">
         <h2>Derniers documents</h2>
         ${docTable(recent, true)}
@@ -639,6 +1255,7 @@
     `;
     bindNewButtons();
     bindDocRows();
+    bindRevenueChart();
     const loadBtn = document.getElementById('load-sample');
     if (loadBtn) {
       loadBtn.onclick = () => {
@@ -653,6 +1270,7 @@
       clearBtn.onclick = async () => {
         if (!await uiConfirm('Effacer toutes les données d’exemple pour commencer avec les vôtres ?', { confirmText: 'Effacer l’exemple', danger: true })) return;
         state = normalize(null);
+        prefillFromAccount(session.account);
         save();
         toast('Exemple effacé');
         go('#/parametres');
@@ -743,6 +1361,9 @@
   function bindDocRows() {
     app.querySelectorAll('[data-open]').forEach(row => {
       row.onclick = () => go('#/doc/' + row.dataset.open);
+      row.onkeydown = e => {
+        if (e.key === 'Enter') go('#/doc/' + row.dataset.open);
+      };
     });
   }
 
@@ -1185,6 +1806,75 @@
   // Paramètres
   // ---------------------------------------------------------------------------
 
+  function bindAccountSettings() {
+    const $ = id => document.getElementById(id);
+    if (session.demo) {
+      $('demo-signup').onclick = () => {
+        session = null;
+        state = normalize(null);
+        go('#/inscription');
+      };
+      return;
+    }
+    app.querySelectorAll('[data-toggle]').forEach(btn => {
+      btn.onclick = () => {
+        const input = $(btn.dataset.toggle);
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        btn.textContent = show ? 'Masquer' : 'Afficher';
+      };
+    });
+    $('account-name-form').onsubmit = e => {
+      e.preventDefault();
+      const name = $('acc-name').value.trim();
+      if (!name) {
+        toast('Indiquez un nom.');
+        return;
+      }
+      const accounts = readAccounts();
+      const stored = accounts.find(a => a.id === session.account.id);
+      if (stored) stored.name = name;
+      writeAccounts(accounts);
+      session.account.name = name;
+      toast('Nom mis à jour');
+      renderSettings();
+    };
+    $('password-form').onsubmit = async e => {
+      e.preventDefault();
+      const error = $('pw-error');
+      const fail = msg => { error.textContent = msg; error.hidden = false; };
+      error.hidden = true;
+      const oldPw = $('pw-old').value;
+      const newPw = $('pw-new').value;
+      if (!oldPw) return fail('Indiquez votre mot de passe actuel.');
+      if (newPw.length < 8) return fail('Le nouveau mot de passe doit contenir au moins 8 caractères.');
+      if (newPw !== $('pw-confirm').value) return fail('Les deux nouveaux mots de passe ne sont pas identiques.');
+      const btn = e.target.querySelector('[type=submit]');
+      btn.disabled = true;
+      try {
+        await changePassword(oldPw, newPw);
+        toast('Mot de passe changé');
+        renderSettings();
+      } catch (err) {
+        btn.disabled = false;
+        fail(err.message === 'password' ? 'Le mot de passe actuel est incorrect.' : 'Impossible de changer le mot de passe. Réessayez.');
+      }
+    };
+    $('account-logout').onclick = logout;
+    $('account-delete').onclick = async () => {
+      const ok = await uiConfirm('Supprimer définitivement le compte « ' + session.account.email + ' » et toutes ses données (clients, devis, factures, paramètres) de cet appareil ?\n\nExportez d’abord une sauvegarde si vous voulez les garder.',
+        { title: 'Supprimer mon compte', confirmText: 'Supprimer mon compte', danger: true });
+      if (!ok) return;
+      const id = session.account.id;
+      await saving;
+      session = null;
+      deleteAccountData(id);
+      state = normalize(null);
+      toast('Compte supprimé');
+      go('#/connexion');
+    };
+  }
+
   function renderSettings() {
     const s = state.settings;
     const field = (id, label, opts = {}) => `
@@ -1198,6 +1888,37 @@
 
     app.innerHTML = `
       <h1>Paramètres</h1>
+
+      <div class="card">
+        <h2>Mon compte</h2>
+        ${session.demo ? `<p class="hint" style="margin-top:0">Vous utilisez la démo sans compte : rien n’est enregistré. Créez un compte pour garder vos devis et factures.</p>
+          <div class="btn-row"><button type="button" class="btn primary" id="demo-signup">Créer un compte</button></div>` : `
+        <div class="account-summary">
+          <span class="avatar large">${esc(initials(session.account.name))}</span>
+          <div>
+            <strong>${esc(session.account.name)}</strong>
+            <div class="hint">${esc(session.account.email)} · compte créé le ${esc(new Date(session.account.createdAt).toLocaleDateString('fr-FR'))}</div>
+          </div>
+        </div>
+        <form id="account-name-form" class="inline-form">
+          <div class="field"><label for="acc-name">Nom affiché</label><input id="acc-name" value="${esc(session.account.name)}" autocomplete="name"></div>
+          <button class="btn" type="submit">Renommer</button>
+        </form>
+        <details class="sub-section">
+          <summary>Changer le mot de passe</summary>
+          <form id="password-form" class="grid cols-3" novalidate>
+            ${passwordField('pw-old', 'Mot de passe actuel', 'current-password')}
+            ${passwordField('pw-new', 'Nouveau mot de passe', 'new-password')}
+            ${passwordField('pw-confirm', 'Confirmer', 'new-password')}
+            <div class="form-error field full" id="pw-error" role="alert" hidden></div>
+            <div class="btn-row field full"><button class="btn primary" type="submit">Changer le mot de passe</button></div>
+          </form>
+        </details>
+        <div class="btn-row" style="margin-top:16px">
+          <button type="button" class="btn" id="account-logout">Se déconnecter</button>
+          <button type="button" class="btn danger" id="account-delete">Supprimer mon compte</button>
+        </div>`}
+      </div>
       <form id="settings-form">
         <div class="card">
           <h2>Mon entreprise</h2>
@@ -1332,7 +2053,7 @@
         uiAlert('Impossible de lire cette image. Essayez avec un autre fichier PNG ou JPG.', 'Logo');
         return;
       }
-      if (!save()) {
+      if (!await save()) {
         s.logo = previous;
         uiAlert('Cette image est trop lourde pour être enregistrée. Essayez une image plus simple ou au format JPG.', 'Logo');
         return;
@@ -1352,6 +2073,8 @@
       save();
       refreshLogo();
     };
+
+    bindAccountSettings();
 
     document.getElementById('settings-form').onsubmit = e => {
       e.preventDefault();
@@ -1408,6 +2131,7 @@
     document.getElementById('reset').onclick = async () => {
       if (!await uiConfirm('Effacer TOUTES les données (clients, devis, factures, paramètres) ? Cette action est irréversible.', { title: 'Tout effacer', confirmText: 'Tout effacer', danger: true })) return;
       state = normalize(null);
+      prefillFromAccount(session.account);
       save();
       toast('Données effacées');
       go('#/');
@@ -1416,14 +2140,11 @@
 
   // ---------------------------------------------------------------------------
 
-  // En démonstration, on ouvre directement sur l'exemple pour montrer l'application en action.
-  if (DEMO && isEmpty() && !state.settings.name) {
-    state = normalize(sampleData());
-    save();
-  }
-
   window.addEventListener('hashchange', route);
-  route();
+  (async () => {
+    if (!DEMO) await restoreSession();
+    route();
+  })();
 
   // Application installable et utilisable hors connexion (uniquement en ligne, en HTTPS).
   if (!DEMO && (location.protocol === 'https:' || location.hostname === 'localhost')) {

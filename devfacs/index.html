@@ -16,7 +16,7 @@
 <body>
   <header class="topbar no-print">
     <div class="brand">Dev<span>Facs</span></div>
-    <nav id="nav">
+    <nav id="nav" hidden>
       <a href="#/" data-route="dashboard">Tableau de bord</a>
       <a href="#/devis" data-route="devis">Devis</a>
       <a href="#/factures" data-route="factures">Factures</a>
@@ -24,6 +24,13 @@
       <a href="#/parametres" data-route="parametres">Paramètres</a>
     </nav>
     <button class="btn small primary" id="install" hidden>Installer l’application</button>
+    <div class="account" id="account" hidden>
+      <a class="account-link" href="#/parametres" title="Mon compte">
+        <span class="avatar" id="account-avatar"></span>
+        <span class="account-name" id="account-name"></span>
+      </a>
+      <button class="btn small" id="logout" type="button">Se déconnecter</button>
+    </div>
   </header>
 
   <main id="app"></main>
