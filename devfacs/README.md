@@ -1,7 +1,7 @@
 # DevFacs — devis & factures pour auto-entrepreneur
 
 **DevFacs** est une application web simple pour faire vos **devis** et **factures** en quelques clics.
-Aucune installation, aucun compte, aucun serveur : ouvrez `index.html` dans votre navigateur.
+Gratuit, sans compte : vos données restent sur votre appareil.
 
 ## Fonctionnalités
 
@@ -25,10 +25,18 @@ Aucune installation, aucun compte, aucun serveur : ouvrez `index.html` dans votr
 
 ## Utilisation
 
-1. Ouvrez `index.html` (double-clic) dans Chrome, Firefox, Edge ou Safari.
-2. Allez dans **Paramètres** et remplissez vos informations (nom, adresse, SIRET, IBAN…), puis ajoutez votre logo et choisissez votre couleur.
-3. Ajoutez un client, puis créez un devis ou une facture.
-4. Cliquez sur **Imprimer / PDF** puis choisissez « Enregistrer au format PDF ».
+**En ligne** : ouvrez https://jonascalvert.github.io/as/ dans votre navigateur.
+
+1. Allez dans **Paramètres** et remplissez vos informations (nom, adresse, SIRET, IBAN…), puis ajoutez votre logo et choisissez votre couleur.
+2. Ajoutez un client, puis créez un devis ou une facture.
+3. Cliquez sur **Imprimer / PDF** puis choisissez « Enregistrer au format PDF ».
+
+**Installer sur téléphone ou ordinateur** (fonctionne ensuite sans connexion) :
+
+- Android / Chrome / Edge : bouton **Installer l’application** en haut de la page, ou menu ⋮ → « Installer l’application ».
+- iPhone / iPad (Safari) : bouton **Partager** → « Sur l’écran d’accueil ».
+
+**Sans internet** : vous pouvez aussi télécharger le dossier `devfacs/` et ouvrir `index.html`.
 
 > Les données restent **uniquement dans votre navigateur** (localStorage).
 > Pensez à faire **Paramètres → Exporter** régulièrement pour garder une copie.

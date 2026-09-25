@@ -113,6 +113,7 @@ a { color: var(--primary); }
 .brand { font-weight: 700; font-size: 18px; }
 .brand span { color: var(--primary); }
 #nav { display: flex; gap: 4px; flex-wrap: wrap; }
+#install { margin-left: auto; }
 #nav a {
   text-decoration: none;
   color: var(--muted);

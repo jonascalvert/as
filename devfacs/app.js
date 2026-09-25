@@ -1357,4 +1357,37 @@
 
   window.addEventListener('hashchange', route);
   route();
+
+  // Application installable et utilisable hors connexion (uniquement en ligne, en HTTPS).
+  if (!DEMO && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => { /* pas de mode hors connexion */ });
+    }
+    // Demande au navigateur de ne pas effacer les données automatiquement.
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().catch(() => {});
+    }
+  }
+
+  let installPrompt = null;
+  const installBtn = document.getElementById('install');
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    installPrompt = e;
+    if (installBtn) installBtn.hidden = false;
+  });
+  window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    if (installBtn) installBtn.hidden = true;
+    toast('DevFacs est installé');
+  });
+  if (installBtn) {
+    installBtn.onclick = async () => {
+      if (!installPrompt) return;
+      installPrompt.prompt();
+      await installPrompt.userChoice.catch(() => null);
+      installPrompt = null;
+      installBtn.hidden = true;
+    };
+  }
 })();

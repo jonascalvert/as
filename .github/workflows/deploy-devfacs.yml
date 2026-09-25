@@ -1,0 +1,43 @@
+# Publie l'application DevFacs (dossier devfacs/) sur GitHub Pages.
+name: Déployer DevFacs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "devfacs/**"
+      - ".github/workflows/deploy-devfacs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Publier sur GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload DevFacs
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: devfacs
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
