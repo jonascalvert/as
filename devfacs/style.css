@@ -294,7 +294,7 @@ textarea { resize: vertical; min-height: 60px; }
 .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
 /* ---------- Tableaux ---------- */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; position: relative; }
 table.list { width: 100%; border-collapse: collapse; }
 table.list th, table.list td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
 table.list th { font-size: 12px; text-transform: uppercase; color: var(--muted); font-weight: 600; }

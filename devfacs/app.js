@@ -554,6 +554,7 @@
           ${opts.body || ''}
           <div class="btn-row modal-actions">
             ${opts.cancelText === null ? '' : `<button type="button" class="btn" data-cancel>${esc(opts.cancelText || 'Annuler')}</button>`}
+            ${(opts.extra || []).map((b, i) => `<button type="button" class="btn ${b.danger ? 'danger' : ''}" data-extra="${i}">${esc(b.label)}</button>`).join('')}
             <button type="submit" class="btn ${opts.danger ? 'danger-fill' : 'primary'}">${esc(opts.confirmText || 'OK')}</button>
           </div>
         </form>`;
@@ -573,6 +574,9 @@
       backdrop.addEventListener('mousedown', e => { if (e.target === backdrop) close(null); });
       const cancel = form.querySelector('[data-cancel]');
       if (cancel) cancel.onclick = () => close(null);
+      form.querySelectorAll('[data-extra]').forEach(btn => {
+        btn.onclick = () => close(opts.extra[Number(btn.dataset.extra)].value);
+      });
       form.onsubmit = e => {
         e.preventDefault();
         const value = opts.onConfirm ? opts.onConfirm(form) : true;
@@ -762,26 +766,79 @@
     return state.docs.find(d => d.id === id);
   }
 
-  async function deleteDoc(doc) {
-    if (doc.type === 'facture') {
-      // La numérotation des factures doit être continue : on ne supprime que la dernière.
-      const year = doc.number.split('-').slice(-2, -1)[0];
-      const key = 'facture-' + year;
-      const last = state.docs
-        .filter(d => d.type === 'facture' && d.number.split('-').slice(-2, -1)[0] === year)
-        .sort((a, b) => b.number.localeCompare(a.number))[0];
-      if (!last || last.id !== doc.id) {
-        await uiAlert('Pour garder une numérotation continue (obligation légale), seule la dernière facture peut être supprimée.\n\nPour cette facture, utilisez plutôt le statut « Annulée ».', 'Suppression impossible');
-        return false;
-      }
-      if (!await uiConfirm('Supprimer définitivement la facture ' + doc.number + ' ?', { confirmText: 'Supprimer', danger: true })) return false;
+  function invoiceYear(doc) {
+    return doc.number.split('-').slice(-2, -1)[0];
+  }
+
+  function isLastInvoice(doc) {
+    const year = invoiceYear(doc);
+    const last = state.docs
+      .filter(d => d.type === 'facture' && invoiceYear(d) === year)
+      .sort((a, b) => b.number.localeCompare(a.number))[0];
+    return !!last && last.id === doc.id;
+  }
+
+  function removeDoc(doc) {
+    if (doc.type === 'facture' && isLastInvoice(doc)) {
+      // Dernière facture de l'année : son numéro pourra être réutilisé.
+      const key = 'facture-' + invoiceYear(doc);
       state.counters[key] = Math.max(0, (state.counters[key] || 1) - 1);
-    } else if (!await uiConfirm('Supprimer définitivement le devis ' + doc.number + ' ?', { confirmText: 'Supprimer', danger: true })) {
-      return false;
     }
     state.docs = state.docs.filter(d => d.id !== doc.id);
     save();
-    return true;
+  }
+
+  // Supprime un devis ou une facture après confirmation.
+  // Renvoie 'deleted', 'cancelled' (facture passée en « Annulée ») ou false.
+  async function deleteDoc(doc) {
+    if (doc.type === 'devis') {
+      const invoice = state.docs.find(d => d.fromDevisId === doc.id);
+      const ok = await uiConfirm('Supprimer définitivement le devis ' + doc.number + ' ?'
+        + (invoice ? '\n\nLa facture ' + invoice.number + ' créée depuis ce devis est conservée.' : ''),
+        { title: 'Supprimer le devis', confirmText: 'Supprimer', danger: true });
+      if (!ok) return false;
+      removeDoc(doc);
+      return 'deleted';
+    }
+
+    if (isLastInvoice(doc)) {
+      const ok = await uiConfirm('Supprimer définitivement la facture ' + doc.number + ' ?\n\nSon numéro sera réutilisé pour la prochaine facture.',
+        { title: 'Supprimer la facture', confirmText: 'Supprimer', danger: true });
+      if (!ok) return false;
+      removeDoc(doc);
+      return 'deleted';
+    }
+
+    // La loi impose une numérotation continue : supprimer une facture ancienne laisse un « trou ».
+    const gap = 'Attention : la numérotation des factures doit être continue (obligation légale). Supprimer ' + doc.number
+      + ' laissera un numéro manquant dans vos factures.';
+    if (doc.status === 'brouillon') {
+      const ok = await uiConfirm('Cette facture est un brouillon.\n\n' + gap,
+        { title: 'Supprimer la facture ' + doc.number, confirmText: 'Supprimer quand même', danger: true });
+      if (!ok) return false;
+      removeDoc(doc);
+      return 'deleted';
+    }
+    const choice = await openModal({
+      title: 'Supprimer la facture ' + doc.number,
+      message: gap + (doc.status === 'annulee'
+        ? '\n\nCette facture est déjà annulée : la garder est recommandé.'
+        : '\n\nRecommandé : marquez-la « Annulée ». Elle reste dans vos archives mais ne compte plus dans vos totaux.'),
+      cancelText: 'Fermer',
+      extra: [{ label: 'Supprimer quand même', value: 'delete', danger: true }],
+      confirmText: doc.status === 'annulee' ? 'Garder la facture' : 'Marquer comme annulée',
+      onConfirm: () => (doc.status === 'annulee' ? 'keep' : 'cancel')
+    });
+    if (choice === 'delete') {
+      removeDoc(doc);
+      return 'deleted';
+    }
+    if (choice === 'cancel') {
+      doc.status = 'annulee';
+      save();
+      return 'cancelled';
+    }
+    return false;
   }
 
   function convertToInvoice(devis) {
@@ -1282,12 +1339,13 @@
   // Listes devis / factures
   // ---------------------------------------------------------------------------
 
-  function docTable(docs, showType) {
+  function docTable(docs, showType, withActions) {
     if (!docs.length) return '<div class="empty">Aucun document pour le moment.</div>';
     return `
       <div class="table-wrap"><table class="list">
         <thead><tr>
           <th>Numéro</th>${showType ? '<th>Type</th>' : ''}<th>Client</th><th>Date</th><th>Statut</th><th class="num">Montant</th>
+          ${withActions ? '<th class="actions"><span class="sr-only">Actions</span></th>' : ''}
         </tr></thead>
         <tbody>
           ${docs.map(d => `
@@ -1298,6 +1356,10 @@
               <td>${fmtDate(d.date)}</td>
               <td>${statusBadge(d)}</td>
               <td class="num">${money(totals(d).ttc)}</td>
+              ${withActions ? `<td class="actions"><div class="btn-row">
+                <button type="button" class="btn small" data-edit-doc="${esc(d.id)}">Modifier</button>
+                <button type="button" class="btn small danger" data-delete-doc="${esc(d.id)}">Supprimer</button>
+              </div></td>` : ''}
             </tr>`).join('')}
         </tbody>
       </table></div>`;
@@ -1328,11 +1390,28 @@
             ${Object.keys(options).map(k => `<option value="${k}" ${k === filter ? 'selected' : ''}>${options[k]}</option>`).join('')}
           </select>
         </div>
-        ${docTable(docs, false)}
+        ${docTable(docs, false, true)}
       </div>`;
 
     bindNewButtons();
     bindDocRows();
+    app.querySelectorAll('[data-edit-doc]').forEach(btn => {
+      btn.onclick = e => {
+        e.stopPropagation();
+        go('#/doc/' + btn.dataset.editDoc);
+      };
+    });
+    app.querySelectorAll('[data-delete-doc]').forEach(btn => {
+      btn.onclick = async e => {
+        e.stopPropagation();
+        const doc = findDoc(btn.dataset.deleteDoc);
+        if (!doc) return;
+        const result = await deleteDoc(doc);
+        if (result === 'deleted') toast((type === 'devis' ? 'Devis ' : 'Facture ') + doc.number + ' supprimé' + (type === 'devis' ? '' : 'e'));
+        if (result === 'cancelled') toast('Facture ' + doc.number + ' marquée comme annulée');
+        if (result) renderDocList(type);
+      };
+    });
     document.getElementById('filter').onchange = e => {
       renderDocList.filter[type] = e.target.value;
       renderDocList(type);
@@ -1589,9 +1668,13 @@
       go('#/doc/' + copy.id);
     };
     $('delete').onclick = async () => {
-      if (await deleteDoc(doc)) {
-        toast('Document supprimé');
+      const result = await deleteDoc(doc);
+      if (result === 'deleted') {
+        toast((doc.type === 'devis' ? 'Devis ' : 'Facture ') + doc.number + ' supprimé' + (doc.type === 'devis' ? '' : 'e'));
         go(doc.type === 'devis' ? '#/devis' : '#/factures');
+      } else if (result === 'cancelled') {
+        toast('Facture ' + doc.number + ' marquée comme annulée');
+        renderEditor(doc.id);
       }
     };
     if ($('convert')) {

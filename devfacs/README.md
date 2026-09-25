@@ -18,6 +18,7 @@ Gratuit : vos données restent sur votre appareil, protégées par votre mot de 
   - échéance, pénalités de retard et indemnité forfaitaire de 40 € (clients professionnels),
   - validité du devis et zone « Bon pour accord ».
 - Suivi des statuts : brouillon, envoyé, accepté/refusé, à payer, payée, annulée, **en retard**.
+- **Modifier** et **Supprimer** un devis ou une facture depuis la liste ou le document. Pour une facture ancienne déjà envoyée, DevFacs propose plutôt de la marquer « Annulée » (numérotation continue obligatoire), mais permet de la supprimer après avertissement.
 - **Clients** : carnet d’adresses réutilisable, avec boutons **Modifier** et **Supprimer** (aussi depuis un devis ou une facture).
 - **Chiffres clés** : CA encaissé de l’année, progression vers le plafond micro-entreprise,
   estimation des cotisations URSSAF, montants à encaisser, devis en attente.
