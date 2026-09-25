@@ -16,7 +16,7 @@ Gratuit, sans compte : vos données restent sur votre appareil.
   - échéance, pénalités de retard et indemnité forfaitaire de 40 € (clients professionnels),
   - validité du devis et zone « Bon pour accord ».
 - Suivi des statuts : brouillon, envoyé, accepté/refusé, à payer, payée, annulée, **en retard**.
-- **Clients** : carnet d’adresses réutilisable.
+- **Clients** : carnet d’adresses réutilisable, avec boutons **Modifier** et **Supprimer** (aussi depuis un devis ou une facture).
 - **Tableau de bord** : CA encaissé de l’année, progression vers le plafond micro-entreprise,
   estimation des cotisations URSSAF, montants à encaisser, devis en attente.
 - **Sauvegarde** : export / import JSON.

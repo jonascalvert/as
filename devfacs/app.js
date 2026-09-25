@@ -358,6 +358,45 @@
     return { id: '', name: '', contact: '', address: '', email: '', phone: '', siret: '', isPro: true };
   }
 
+  // Enregistre les modifications d'un client et met à jour les brouillons qui l'utilisent
+  // (les documents déjà envoyés gardent les coordonnées d'origine).
+  function updateClient(client, data) {
+    Object.assign(client, data);
+    state.docs.forEach(d => {
+      if (d.clientId === client.id && d.status === 'brouillon') d.client = snapshotClient(client.id);
+    });
+    save();
+  }
+
+  function editClientModal(client) {
+    return openModal({
+      title: 'Modifier le client',
+      body: `<div class="grid cols-2">${clientFieldsHTML(client, 'm')}</div>`,
+      confirmText: 'Enregistrer',
+      onConfirm: form => {
+        const data = readClientFields(form, 'm');
+        if (!data.name) {
+          form.querySelector('#m-name').focus();
+          toast('Indiquez au moins le nom du client.');
+          return false;
+        }
+        return data;
+      }
+    });
+  }
+
+  async function deleteClient(client) {
+    const used = state.docs.filter(d => d.clientId === client.id).length;
+    const message = 'Supprimer le client « ' + client.name + ' » ?' + (used
+      ? '\n\n' + used + ' devis ou facture(s) utilisent ce client : ils sont conservés, avec ses coordonnées.'
+      : '');
+    if (!await uiConfirm(message, { title: 'Supprimer le client', confirmText: 'Supprimer', danger: true })) return false;
+    state.clients = state.clients.filter(c => c.id !== client.id);
+    save();
+    toast('Client « ' + client.name + ' » supprimé');
+    return true;
+  }
+
   function askNewClient() {
     return openModal({
       title: 'Nouveau client',
@@ -734,11 +773,14 @@
             <div class="grid cols-2">
               <div class="field">
                 <label for="f-client">Client</label>
-                <select id="f-client">
-                  <option value="">— Choisir un client —</option>
-                  ${state.clients.map(c => `<option value="${esc(c.id)}" ${c.id === doc.clientId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
-                  <option value="__new">+ Nouveau client…</option>
-                </select>
+                <div class="select-row">
+                  <select id="f-client">
+                    <option value="">— Choisir un client —</option>
+                    ${state.clients.map(c => `<option value="${esc(c.id)}" ${c.id === doc.clientId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+                    <option value="__new">+ Nouveau client…</option>
+                  </select>
+                  <button type="button" class="btn small" id="edit-client" ${state.clients.some(c => c.id === doc.clientId) ? '' : 'hidden'}>Modifier</button>
+                </div>
               </div>
               <div class="field">
                 <label for="f-status">Statut</label>
@@ -870,7 +912,21 @@
       }
       doc.clientId = e.target.value;
       doc.client = snapshotClient(doc.clientId);
+      $('edit-client').hidden = !doc.clientId;
       touch();
+    };
+
+    $('edit-client').onclick = async () => {
+      const client = state.clients.find(c => c.id === doc.clientId);
+      if (!client) return;
+      const data = await editClientModal(client);
+      if (!data) return;
+      updateClient(client, data);
+      // Le document ouvert prend les nouvelles coordonnées, même s'il n'est plus en brouillon.
+      doc.client = snapshotClient(client.id);
+      save();
+      toast('Client « ' + client.name + ' » modifié');
+      renderEditor(doc.id);
     };
 
     $('f-status').onchange = e => {
@@ -1057,7 +1113,7 @@
       <div class="card">
         ${list.length ? `
           <div class="table-wrap"><table class="list">
-            <thead><tr><th>Nom</th><th>E-mail</th><th>Téléphone</th><th class="num">Facturé</th></tr></thead>
+            <thead><tr><th>Nom</th><th>E-mail</th><th>Téléphone</th><th class="num">Facturé</th><th class="actions"><span class="sr-only">Actions</span></th></tr></thead>
             <tbody>
               ${list.map(c => {
                 const billed = state.docs.filter(d => d.type === 'facture' && d.clientId === c.id && d.status !== 'annulee')
@@ -1067,6 +1123,12 @@
                   <td>${esc(c.email)}</td>
                   <td>${esc(c.phone)}</td>
                   <td class="num">${money(billed)}</td>
+                  <td class="actions">
+                    <div class="btn-row">
+                      <button type="button" class="btn small" data-edit="${esc(c.id)}">Modifier</button>
+                      <button type="button" class="btn small danger" data-remove="${esc(c.id)}">Supprimer</button>
+                    </div>
+                  </td>
                 </tr>`;
               }).join('')}
             </tbody>
@@ -1075,6 +1137,19 @@
 
     app.querySelectorAll('[data-client]').forEach(row => {
       row.onclick = () => go('#/clients/' + row.dataset.client);
+    });
+    app.querySelectorAll('[data-edit]').forEach(btn => {
+      btn.onclick = e => {
+        e.stopPropagation();
+        go('#/clients/' + btn.dataset.edit);
+      };
+    });
+    app.querySelectorAll('[data-remove]').forEach(btn => {
+      btn.onclick = async e => {
+        e.stopPropagation();
+        const client = state.clients.find(c => c.id === btn.dataset.remove);
+        if (client && await deleteClient(client)) go('#/clients');
+      };
     });
 
     const form = document.getElementById('client-form');
@@ -1088,26 +1163,18 @@
           return;
         }
         if (editing.id) {
-          Object.assign(editing, data);
-          // Met à jour les brouillons qui utilisent ce client.
-          state.docs.forEach(d => {
-            if (d.clientId === editing.id && d.status === 'brouillon') d.client = snapshotClient(editing.id);
-          });
+          updateClient(editing, data);
         } else {
           state.clients.push(Object.assign({ id: uid() }, data));
+          save();
         }
-        save();
         toast('Client enregistré');
         go('#/clients');
       };
       const del = document.getElementById('c-delete');
       if (del) {
         del.onclick = async () => {
-          if (!await uiConfirm('Supprimer le client « ' + editing.name + ' » ? Les documents existants sont conservés.', { confirmText: 'Supprimer', danger: true })) return;
-          state.clients = state.clients.filter(c => c.id !== editing.id);
-          save();
-          toast('Client supprimé');
-          go('#/clients');
+          if (await deleteClient(editing)) go('#/clients');
         };
       }
       document.getElementById('c-name').focus();
