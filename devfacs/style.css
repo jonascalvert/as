@@ -39,7 +39,7 @@ a { color: var(--primary); }
   flex-wrap: wrap;
 }
 .brand { font-weight: 700; font-size: 18px; }
-.brand span { color: var(--primary); margin: 0 2px; }
+.brand span { color: var(--primary); }
 #nav { display: flex; gap: 4px; flex-wrap: wrap; }
 #nav a {
   text-decoration: none;

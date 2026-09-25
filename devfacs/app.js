@@ -1,9 +1,9 @@
-/* Devis & Factures — application simple pour auto-entrepreneur.
+/* DevFacs — application simple de devis et factures pour auto-entrepreneur.
  * Tout est stocké dans le navigateur (localStorage). Aucune installation. */
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'devis-factures:v1';
+  const STORAGE_KEY = 'devfacs:v1';
 
   const STATUS = {
     devis: {
@@ -952,7 +952,7 @@
       const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'devis-factures-sauvegarde-' + todayISO() + '.json';
+      a.download = 'devfacs-sauvegarde-' + todayISO() + '.json';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -973,7 +973,7 @@
           toast('Données importées');
           go('#/');
         } catch (err) {
-          alert('Fichier invalide : ce n’est pas une sauvegarde Devis & Factures.');
+          alert('Fichier invalide : ce n’est pas une sauvegarde DevFacs.');
         }
       };
       reader.readAsText(file);

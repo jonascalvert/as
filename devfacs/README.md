@@ -1,6 +1,6 @@
-# Devis & Factures — pour auto-entrepreneur
+# DevFacs — devis & factures pour auto-entrepreneur
 
-Application web simple pour faire vos **devis** et **factures** en quelques clics.
+**DevFacs** est une application web simple pour faire vos **devis** et **factures** en quelques clics.
 Aucune installation, aucun compte, aucun serveur : ouvrez `index.html` dans votre navigateur.
 
 ## Fonctionnalités
