@@ -7,6 +7,7 @@ Aucune installation, aucun compte, aucun serveur : ouvrez `index.html` dans votr
 
 - **Devis** et **factures** avec numérotation automatique et continue (`D-2026-001`, `F-2026-001`).
 - **Transformer un devis en facture** en un clic (le devis passe en « Accepté »).
+- **Logo** sur les devis et factures (PNG, JPG ou SVG, trois tailles).
 - **Couleur personnalisable** des devis et factures (8 couleurs proposées ou n’importe quelle autre), dans Paramètres.
 - Aperçu en direct du document + **Imprimer / PDF** (format A4).
 - Mentions obligatoires ajoutées automatiquement :
@@ -25,7 +26,7 @@ Aucune installation, aucun compte, aucun serveur : ouvrez `index.html` dans votr
 ## Utilisation
 
 1. Ouvrez `index.html` (double-clic) dans Chrome, Firefox, Edge ou Safari.
-2. Allez dans **Paramètres** et remplissez vos informations (nom, adresse, SIRET, IBAN…).
+2. Allez dans **Paramètres** et remplissez vos informations (nom, adresse, SIRET, IBAN…), puis ajoutez votre logo et choisissez votre couleur.
 3. Ajoutez un client, puis créez un devis ou une facture.
 4. Cliquez sur **Imprimer / PDF** puis choisissez « Enregistrer au format PDF ».
 

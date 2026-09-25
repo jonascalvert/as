@@ -41,6 +41,8 @@
     revenueCap: 77700,
     contributionRate: 21.2,
     docColor: '#2457d6',
+    logo: '',
+    logoSize: 'moyen',
     quotePrefix: 'D',
     invoicePrefix: 'F'
   };
@@ -72,8 +74,10 @@
   function save() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      return true;
     } catch (e) {
-      toast('Impossible d’enregistrer : stockage du navigateur indisponible.');
+      toast('Impossible d’enregistrer : stockage du navigateur indisponible ou plein.');
+      return false;
     }
   }
 
@@ -205,6 +209,31 @@
       text = mixHex(accent, '#000000', i * 0.08);
     }
     return '--doc-accent:' + accent + ';--doc-accent-text:' + text + ';--doc-tint:' + mixHex(accent, '#ffffff', 0.88) + ';--doc-tint-strong:' + mixHex(accent, '#ffffff', 0.7);
+  }
+
+  // Réduit une image (logo) pour qu'elle reste légère dans le stockage du navigateur.
+  function resizeImage(file, maxSize) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = reject;
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = reject;
+        img.onload = () => {
+          const w = img.naturalWidth || maxSize;
+          const h = img.naturalHeight || maxSize;
+          const scale = Math.min(1, maxSize / Math.max(w, h));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(w * scale));
+          canvas.height = Math.max(1, Math.round(h * scale));
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          const keepAlpha = file.type !== 'image/jpeg';
+          resolve(keepAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.9));
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
   function round2(n) {
@@ -931,6 +960,7 @@
     return `<div class="doc" style="${docColorStyle(s.docColor)}">
       <div class="doc-head">
         <div class="issuer">
+          ${s.logo ? `<img class="logo logo-${esc(s.logoSize || 'moyen')}" src="${esc(s.logo)}" alt="Logo">` : ''}
           <strong>${esc(me.name || 'Votre nom (à renseigner dans Paramètres)')}${me.name && !/\bEI\b/.test(me.name) ? ' EI' : ''}</strong><br>
           ${me.activity ? esc(me.activity) + '<br>' : ''}
           ${esc(me.address).replace(/\n/g, '<br>')}${me.address ? '<br>' : ''}
@@ -1151,8 +1181,24 @@
       </form>
 
       <div class="card" style="margin-top:24px">
-        <h2>Couleur des devis et factures</h2>
-        <p class="hint" style="margin-top:0">Choisissez la couleur de vos documents : titre, en-tête du tableau et totaux. Elle s’applique à tous vos devis et factures, et s’enregistre tout de suite.</p>
+        <h2>Logo et couleur des devis et factures</h2>
+        <p class="hint" style="margin-top:0">Vos choix s’appliquent à tous vos devis et factures et s’enregistrent tout de suite.</p>
+        <label>Logo</label>
+        <div class="logo-picker">
+          <div class="logo-box" id="logo-box"></div>
+          <div class="btn-row">
+            <label class="btn small" for="logo-file" style="margin:0;color:var(--text);font-size:13px">Choisir une image…</label>
+            <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" hidden>
+            <button type="button" class="btn small danger" id="logo-remove">Retirer le logo</button>
+            <select id="logo-size" aria-label="Taille du logo" style="width:auto">
+              <option value="petit" ${s.logoSize === 'petit' ? 'selected' : ''}>Petit</option>
+              <option value="moyen" ${!s.logoSize || s.logoSize === 'moyen' ? 'selected' : ''}>Moyen</option>
+              <option value="grand" ${s.logoSize === 'grand' ? 'selected' : ''}>Grand</option>
+            </select>
+          </div>
+        </div>
+        <p class="hint">PNG, JPG ou SVG. Un logo sur fond transparent (PNG) rend mieux.</p>
+        <label style="margin-top:16px">Couleur</label>
         <div class="color-picker">
           <div class="swatches" role="radiogroup" aria-label="Couleurs proposées">
             ${DOC_COLORS.map(c => `<button type="button" class="swatch" role="radio" data-color="${c.value}" style="--sw:${c.value}" aria-checked="${validHex(s.docColor) === c.value}" title="${c.name}"><span class="sr-only">${c.name}</span></button>`).join('')}
@@ -1193,6 +1239,52 @@
     colorInput.oninput = () => setDocColor(colorInput.value, false);
     colorInput.onchange = () => setDocColor(colorInput.value, true);
     setDocColor(s.docColor, false);
+
+    function refreshLogo() {
+      document.getElementById('logo-box').innerHTML = s.logo
+        ? `<img src="${esc(s.logo)}" alt="Votre logo">`
+        : '<span class="hint">Aucun logo</span>';
+      document.getElementById('logo-remove').hidden = !s.logo;
+      document.getElementById('logo-size').hidden = !s.logo;
+      colorPreview.innerHTML = paperHTML(previewDoc);
+    }
+    refreshLogo();
+
+    document.getElementById('logo-file').onchange = async e => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      if (!/^image\//.test(file.type)) {
+        uiAlert('Ce fichier n’est pas une image. Choisissez un fichier PNG, JPG ou SVG.', 'Logo');
+        return;
+      }
+      const previous = s.logo;
+      try {
+        s.logo = await resizeImage(file, 500);
+      } catch (err) {
+        uiAlert('Impossible de lire cette image. Essayez avec un autre fichier PNG ou JPG.', 'Logo');
+        return;
+      }
+      if (!save()) {
+        s.logo = previous;
+        uiAlert('Cette image est trop lourde pour être enregistrée. Essayez une image plus simple ou au format JPG.', 'Logo');
+        return;
+      }
+      refreshLogo();
+      toast('Logo enregistré');
+    };
+    document.getElementById('logo-remove').onclick = async () => {
+      if (!await uiConfirm('Retirer le logo de vos devis et factures ?', { confirmText: 'Retirer', danger: true })) return;
+      s.logo = '';
+      save();
+      refreshLogo();
+      toast('Logo retiré');
+    };
+    document.getElementById('logo-size').onchange = e => {
+      s.logoSize = e.target.value;
+      save();
+      refreshLogo();
+    };
 
     document.getElementById('settings-form').onsubmit = e => {
       e.preventDefault();
